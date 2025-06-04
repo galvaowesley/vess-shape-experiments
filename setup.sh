@@ -8,7 +8,7 @@ pip install -e torchtrainer
 
 # 3. Clone vessel-shape-dataset
 if [ ! -d "vess-shape-dataset" ]; then
-    git clone git@github.com:galvaowesley/vess-shape-dataset.git
+    git clone https://github.com/galvaowesley/vess-shape-dataset.git
 fi
 
 # 4. Install vessel-shape-dataset package
