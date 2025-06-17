@@ -35,7 +35,6 @@ class ValidTransforms:
                                             self.resize_size, 
                                             interpolation=tv_transf.InterpolationMode.NEAREST_EXACT)
 
-        # img = img.float()/255
         target = target.to(dtype=torch.int64)
         target = target.squeeze(0)  # <-- Remover a dimensão extra
 
@@ -44,7 +43,7 @@ class ValidTransforms:
 def get_datasets(datasets_root):
 
     ignore_index = 2  # For the DRIVE dataset
-    root_vesshape = Path(datasets_root) / "VessShape/curves"
+    root_vesshape = Path(datasets_root) / "VessShape"
     root_drive = Path(datasets_root) / "DRIVE"
     root_vessmap = Path(datasets_root) / "VessMAP"
 
@@ -59,8 +58,8 @@ def get_datasets(datasets_root):
     sigma = (1, 2)                      # Standard deviation of the Gaussian noise 
         
     # Parameters for the dataset
-    texture_dir = '/media/wesleygalvao/1_TB_LINUX/Datasets/ImageNet/ILSVRC2012_img_val/'  # Update as needed
-    annotation_csv = '/media/wesleygalvao/1_TB_LINUX/Datasets/ImageNet/ILSVRC2012_img_val_annotation.csv'
+    texture_dir = '/home/wesleygalvao/Documents/Datasets/ImageNet/ILSVRC2012_img_val/'  # Update as needed
+    annotation_csv = '/home/wesleygalvao/Documents/Datasets/ImageNet/ILSVRC2012_img_val_annotation.csv'
 
     # Instanciando os geradores com ranges
     vessel_texture_train = VesselTexture(
@@ -74,17 +73,19 @@ def get_datasets(datasets_root):
         crop_size=(size, size),
         sigma=sigma
     )
-    vessel_texture_valid = VesselTexture(
-        image_size=size,
-        n_control_points=n_control_points_range,
-        max_vd=max_vd_range,
-        radius=radius_range,
-        num_curves=num_curves_range,
-        texture_dir=texture_dir,
-        annotation_csv=annotation_csv,
-        crop_size=(size, size),
-        sigma=sigma
-    )
+    
+    # Not using 
+    # vessel_texture_valid = VesselTexture(
+    #     image_size=size,
+    #     n_control_points=n_control_points_range,
+    #     max_vd=max_vd_range,
+    #     radius=radius_range,
+    #     num_curves=num_curves_range,
+    #     texture_dir=texture_dir,
+    #     annotation_csv=annotation_csv,
+    #     crop_size=(size, size),
+    #     sigma=sigma
+    # )
     
     ds_train_vessshape = VesselShapeDataset(vessel_texture_train, n_samples=50_000, gray_scale=True, normalize=True)
     
@@ -106,8 +107,8 @@ def get_datasets(datasets_root):
         "VessMAP": ds_valid_vessmap
     }
     
-    class_weights = (0.348, 0.652)
-    # class_weights = (0.1036, 0.8964) # Dynamic VesselShape
+    # class_weights = (0.348, 0.652)
+    class_weights = (0.1036, 0.8964) # Dynamic VesselShape
 
     return ds_train_vessshape, ds_valids, class_weights, ignore_index
 
