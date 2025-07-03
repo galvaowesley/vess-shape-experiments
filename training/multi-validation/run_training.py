@@ -2,7 +2,7 @@ from train import MultiTrainer
 
 params1 = {
      "experiment_name": "training_on_auto_vess-shape_multiple_validation",
-    "run_name": "resnet18_ts:50k_bs-train:192_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16_original-curves",
+    "run_name": "resnet18_ts:50k_bs-train:192_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16",
     "validate_every": 5,
     "save_val_imgs": "",
     "val_img_indices": "0 1 2 3 4",

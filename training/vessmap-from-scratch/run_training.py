@@ -3,7 +3,7 @@ from train import VesselTrainer
 # The parameters below reproduce those used in the lwnet paper
 params = {
     "experiment_name": "training_on_vessmap_from_scratch",
-    "run_name": "resnet50_ts:80_bs-train:8_ep:1000_lr:0.01_lr-decay:1.0_wd:0.0_opt:adam_val-metric:Dice_FP16",
+    "run_name": "resnet18_ts:80_bs-train:8_ep:1000_lr:0.01_lr-decay:1.0_wd:0.0_opt:adam_val-metric:Dice_FP16",
     "validate_every": 5,
     "save_val_imgs": "",
     "val_img_indices": "0 1 2 3",
@@ -12,7 +12,7 @@ params = {
     "split_strategy": "file",
     "resize_size": "256 256",
     #'ignore_class_weights': '',
-    "model_class": "resnet50_unet",
+    "model_class": "resnet18_unet",
     "num_epochs": 1000,
     "validation_metric": "Dice",
     "maximize_validation_metric": "",
