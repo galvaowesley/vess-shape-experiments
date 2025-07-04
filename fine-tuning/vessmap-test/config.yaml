@@ -1,23 +1,36 @@
-experiment_name: finetuning_on_vessmap_test
-run_name: ''
-weights_strategy: /home/wesleygalvao/Documents/vessel-shape-experiments/training/multi-validation/experiments/training_on_auto_vess-shape_multiple_validation/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
-validate_every: 5
-save_val_imgs: ''
-val_img_indices: '0 1 2 3'
-dataset_path: /home/wesleygalvao/Documents/Datasets/blood_vessels/VessMAP
-dataset_class: vessmap_few
-split_strategy: ''
-resize_size: '256 256'
-model_class: resnet50_unet
-num_epochs: 1000
-validation_metric: Dice
-maximize_validation_metric: ''
-bs_train: 8
-bs_valid: 4
-weight_decay: 0.0
-lr: 0.0001
-lr_decay: 1.0
-optimizer: adam
-num_workers: 8
-log_wandb: ''
-wandb_project: finetuning_on_vessmap_test
+# Sessão de parâmetros do treinamento
+train_params:
+  experiment_name: finetuning_on_vessmap_test
+  run_name: ''
+  weights_strategy: /home/wesleygalvao/Documents/vessel-shape-experiments/training/multi-validation/experiments/training_on_auto_vess-shape_multiple_validation/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
+  validate_every: 5
+  save_val_imgs: ''
+  val_img_indices: '0 1 2 3'
+  dataset_path: /home/wesleygalvao/Documents/Datasets/blood_vessels/VessMAP
+  dataset_class: vessmap_few
+  split_strategy: ''
+  resize_size: '256 256'
+  model_class: resnet50_unet
+  num_epochs: 1000
+  validation_metric: Dice
+  maximize_validation_metric: ''
+  bs_train: 8
+  bs_valid: 4
+  weight_decay: 0.0
+  lr: 0.0001
+  lr_decay: 1.0
+  optimizer: adam
+  num_workers: 8
+  log_wandb: ''
+  wandb_project: finetuning_on_vessmap_test
+
+# Sessão de parâmetros dos experimentos em série
+experiment_params:
+  min_samples: 1
+  max_samples: 20
+  runs: 10
+  reps: 5
+  with_replacement: false
+  output_dir: runs
+  step: 1
+  csv_path: path/to/your/csv.csv

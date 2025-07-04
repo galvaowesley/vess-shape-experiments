@@ -105,19 +105,31 @@ def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, re
 
 def load_params_from_yaml(yaml_path):
     """
-    Loads experiment parameters from a YAML configuration file.
+    Loads experiment and training parameters from a YAML configuration file with two sections:
+    - train_params: training parameters
+    - experiment_params: experiment loop parameters
 
     Args:
         yaml_path (str): Path to the YAML config file.
 
     Returns:
-        dict: Dictionary with experiment parameters.
+        tuple: (train_params: dict, experiment_params: dict)
     """
     with open(yaml_path, 'r') as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    return config['train_params'], config['experiment_params']
 
 if __name__ == "__main__":
-    config_path = "config.yaml"  # ou o caminho desejado
-    params = load_params_from_yaml(config_path)
-    run_experiments(params, 'path/to/your/csv.csv', with_replacement=False)
-    run_experiments(params, 'path/to/your/csv.csv', with_replacement=True)
+    config_path = "config.yaml" 
+    train_params, experiment_params = load_params_from_yaml(config_path)
+    run_experiments(
+        train_params,
+        experiment_params['csv_path'],
+        min_samples=experiment_params.get('min_samples', 1),
+        max_samples=experiment_params.get('max_samples', 20),
+        runs=experiment_params.get('runs', 10),
+        reps=experiment_params.get('reps', 5),
+        with_replacement=experiment_params.get('with_replacement', False),
+        output_dir=experiment_params.get('output_dir', 'runs'),
+        step=experiment_params.get('step', 1)
+    )
