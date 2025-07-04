@@ -4,21 +4,21 @@ import os
 import yaml
 from train import VesselTrainer
 from torchtrainer.util.train_util import dict_to_argv
+from pathlib import Path
 
 def read_names_from_csv(csv_path):
     """
-    Reads a CSV file and returns a list of names (assumes names are in the first column).
+    Reads a CSV file and returns a list of names (removes extension if present).
 
     Args:
         csv_path (str): Path to the CSV file.
 
     Returns:
-        list: List of names (strings) from the first column of the CSV.
+        list: List of names (strings) from the first column of the CSV, without extension.
     """
     with open(csv_path, newline='') as csvfile:
         reader = csv.reader(csvfile)
-        # Skip the header if it exists
-        return [row[0] for row in reader if row]
+        return [Path(row[0]).stem for row in reader if row]
 
 def save_selected_names(selected, output_dir, run_number, num_samples):
     """
@@ -36,6 +36,16 @@ def save_selected_names(selected, output_dir, run_number, num_samples):
         writer = csv.writer(csvfile)
         for name in selected:
             writer.writerow([name])
+
+def save_selected_names_report(report_path, report_rows):
+    """
+    Saves a report of all selected names for all runs and num_samples in a single CSV file.
+    Each row contains: run_number, num_samples, file_name
+    """
+    with open(report_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["run_number", "num_samples", "file_name"])
+        writer.writerows(report_rows)
 
 def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, reps=5, with_replacement=False, output_dir="experiments", step=1):
     """
@@ -58,6 +68,7 @@ def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, re
     used_combinations = set() if not with_replacement else None
     print(f"[INFO] Starting experiments: min_samples={min_samples}, max_samples={max_samples}, runs={runs}, reps={reps}, with_replacement={with_replacement}, step={step}")
 
+    report_rows = []
     num_samples = min_samples
     while num_samples < max_samples:
         print(f"\n[INFO] === num_samples: {num_samples} ===")
@@ -92,16 +103,22 @@ def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, re
             save_selected_names(selected, experiment_dir, run_number, num_samples)
             print(f"[INFO]   Saved selected names to {experiment_dir}/selected_names_run{run_number}_n{num_samples}.csv")
             for rep_idx in range(reps):
-                params["run_name"] = f"{prefix}_r:{run_number}_s:{rep_idx}_n:{num_samples}"
+                params["run_name"] = f"{prefix}_run:{run_number}_rep:{rep_idx}_ns:{num_samples}"
                 params["seed"] = rep_idx
                 commandline = ' '.join(dict_to_argv(params, ["dataset_path", "dataset_class", "model_class"]))
-                print(f"[INFO]    [rep {rep_idx}] Running: python train.py {commandline}")
+                print(f"[INFO]    [rep {rep_idx}] Running: python train.py")
                 os.system(f"python train.py {commandline}")
+            for name in selected:
+                report_rows.append([run_number, num_samples, name])
         # Step logic: starts with 1, then 2, then step in step
         if num_samples == 1:
             num_samples += 1
         else:
             num_samples += step
+    # Salva o relatório único ao final
+    report_path = os.path.join(output_dir, params['experiment_name'], 'selected_names_report.csv')
+    save_selected_names_report(report_path, report_rows)
+    print(f"[INFO]   Saved global report to {report_path}")
 
 def load_params_from_yaml(yaml_path):
     """
@@ -130,6 +147,6 @@ if __name__ == "__main__":
         runs=experiment_params.get('runs', 10),
         reps=experiment_params.get('reps', 5),
         with_replacement=experiment_params.get('with_replacement', False),
-        output_dir=experiment_params.get('output_dir', 'experiments'),
+        output_dir=experiment_params.get('output_dir', 'runs'),
         step=experiment_params.get('step', 1)
     )

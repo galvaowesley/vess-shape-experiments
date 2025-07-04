@@ -3,7 +3,7 @@ train_params:
   experiment_name: ft_on_vessmap_hp_disc
   run_name: ''
   weights_strategy: /home/wesleygalvao/Documents/vessel-shape-experiments/training/multi-validation/experiments/training_on_auto_vess-shape_multiple_validation/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
-  validate_every: 5
+  validate_every: 2
   save_val_imgs: ''
   val_img_indices: '0 1 2 3'
   dataset_path: /home/wesleygalvao/Documents/Datasets/blood_vessels/VessMAP
@@ -11,7 +11,7 @@ train_params:
   split_strategy: ''
   resize_size: '256 256'
   model_class: resnet50_unet
-  num_epochs: 1000
+  num_epochs: 50
   validation_metric: Dice
   maximize_validation_metric: ''
   bs_train: 8
