@@ -1,6 +1,6 @@
 # Sessão de parâmetros do treinamento
 train_params:
-  experiment_name: finetuning_on_vessmap_test
+  experiment_name: ft_on_vessmap_hp_disc
   run_name: ''
   weights_strategy: /home/wesleygalvao/Documents/vessel-shape-experiments/training/multi-validation/experiments/training_on_auto_vess-shape_multiple_validation/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
   validate_every: 5
@@ -22,15 +22,15 @@ train_params:
   optimizer: adam
   num_workers: 8
   log_wandb: ''
-  wandb_project: finetuning_on_vessmap_test
+  wandb_project: ft_on_vessmap_hp_disc
 
 # Sessão de parâmetros dos experimentos em série
 experiment_params:
   min_samples: 1
   max_samples: 20
-  runs: 10
+  runs: 5
   reps: 5
   with_replacement: false
-  output_dir: runs
-  step: 1
-  csv_path: path/to/your/csv.csv
+  output_dir: experiments
+  step: 2
+  csv_path: /home/wesleygalvao/Documents/Datasets/blood_vessels/VessMAP/train.csv

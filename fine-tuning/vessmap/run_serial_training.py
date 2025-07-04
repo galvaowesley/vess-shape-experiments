@@ -130,6 +130,6 @@ if __name__ == "__main__":
         runs=experiment_params.get('runs', 10),
         reps=experiment_params.get('reps', 5),
         with_replacement=experiment_params.get('with_replacement', False),
-        output_dir=experiment_params.get('output_dir', 'runs'),
+        output_dir=experiment_params.get('output_dir', 'experiments'),
         step=experiment_params.get('step', 1)
     )
