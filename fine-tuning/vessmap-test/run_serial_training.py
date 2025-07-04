@@ -37,6 +37,16 @@ def save_selected_names(selected, output_dir, run_number, num_samples):
         for name in selected:
             writer.writerow([name])
 
+def save_selected_names_report(report_path, report_rows):
+    """
+    Saves a report of all selected names for all runs and num_samples in a single CSV file.
+    Each row contains: run_number, num_samples, file_name
+    """
+    with open(report_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["run_number", "num_samples", "file_name"])
+        writer.writerows(report_rows)
+
 def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, reps=5, with_replacement=False, output_dir="experiments", step=1):
     """
     Runs a series of training experiments with different splits of the dataset, supporting both with and without replacement.
@@ -58,6 +68,7 @@ def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, re
     used_combinations = set() if not with_replacement else None
     print(f"[INFO] Starting experiments: min_samples={min_samples}, max_samples={max_samples}, runs={runs}, reps={reps}, with_replacement={with_replacement}, step={step}")
 
+    report_rows = []
     num_samples = min_samples
     while num_samples < max_samples:
         print(f"\n[INFO] === num_samples: {num_samples} ===")
@@ -95,13 +106,19 @@ def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, re
                 params["run_name"] = f"{prefix}_r:{run_number}_s:{rep_idx}_n:{num_samples}"
                 params["seed"] = rep_idx
                 commandline = ' '.join(dict_to_argv(params, ["dataset_path", "dataset_class", "model_class"]))
-                print(f"[INFO]    [rep {rep_idx}] Running: python train.py {commandline}")
+                print(f"[INFO]    [rep {rep_idx}] Running: python train.py")
                 os.system(f"python train.py {commandline}")
+            for name in selected:
+                report_rows.append([run_number, num_samples, name])
         # Step logic: starts with 1, then 2, then step in step
         if num_samples == 1:
             num_samples += 1
         else:
             num_samples += step
+    # Salva o relatório único ao final
+    report_path = os.path.join(output_dir, params['experiment_name'], 'selected_names_report.csv')
+    save_selected_names_report(report_path, report_rows)
+    print(f"[INFO]   Saved global report to {report_path}")
 
 def load_params_from_yaml(yaml_path):
     """
