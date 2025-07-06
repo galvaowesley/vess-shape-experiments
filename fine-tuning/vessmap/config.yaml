@@ -17,7 +17,7 @@ train_params:
   bs_train: 8
   bs_valid: 4
   weight_decay: 0.0
-  lr: 0.0001
+  lr: 0.001
   lr_decay: 1.0
   optimizer: adam
   num_workers: 8
@@ -28,8 +28,8 @@ train_params:
 experiment_params:
   min_samples: 1
   max_samples: 20
-  runs: 5
-  reps: 5
+  runs: 2
+  reps: 1
   with_replacement: false
   output_dir: experiments
   step: 2
