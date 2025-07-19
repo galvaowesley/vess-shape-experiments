@@ -1,4 +1,5 @@
 import csv
+import subprocess
 import random
 import os
 import yaml
@@ -20,34 +21,28 @@ def read_names_from_csv(csv_path):
         reader = csv.reader(csvfile)
         return [Path(row[0]).stem for row in reader if row]
 
-def save_selected_names(selected, output_dir, run_number, num_samples):
+
+def save_report(report_path, report_rows):
     """
-    Saves the selected names for a given run_number and num_samples to a CSV file in the output directory.
+    Saves experiment information to a single CSV file in the 'report' folder, appending new rows.
+    Each row contains: wandb_group, num_samples, run_number, rep_idx, file_name.
 
     Args:
-        selected (list): List of selected names.
-        output_dir (str): Directory to save the CSV file.
-        run_number (int): The current run number.
-        num_samples (int): The number of samples in this run.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    csv_filename = os.path.join(output_dir, f"selected_names_run{run_number}_n{num_samples}.csv")
-    with open(csv_filename, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        for name in selected:
-            writer.writerow([name])
+        report_path (str): Path to the CSV report file.
+        report_rows (list of list): List of rows to append, where each row contains experiment information.
 
-def save_selected_names_report(report_path, report_rows):
+    Returns:
+        None
     """
-    Saves a report of all selected names for all runs and num_samples in a single CSV file.
-    Each row contains: run_number, num_samples, file_name
-    """
-    with open(report_path, 'w', newline='') as csvfile:
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
+    file_exists = os.path.exists(report_path)
+    with open(report_path, 'a', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(["run_number", "num_samples", "file_name"])
+        if not file_exists:
+            writer.writerow(["wandb_group", "num_samples", "run_number", "rep_idx", "file_name"])
         writer.writerows(report_rows)
 
-def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, reps=5, with_replacement=False, output_dir="experiments", step=1):
+def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, reps=5, with_replacement=False, output_dir="experiments", step=1, weights_id=None):
     """
     Runs a series of training experiments with different splits of the dataset, supporting both with and without replacement.
     The number of samples in the split can be incremented by a custom step, always starting with 1 (one-shot).
@@ -68,57 +63,53 @@ def run_experiments(params, csv_path, min_samples=1, max_samples=20, runs=10, re
     used_combinations = set() if not with_replacement else None
     print(f"[INFO] Starting experiments: min_samples={min_samples}, max_samples={max_samples}, runs={runs}, reps={reps}, with_replacement={with_replacement}, step={step}")
 
-    report_rows = []
     num_samples = min_samples
-    while num_samples < max_samples:
+    report_dir = os.path.join(output_dir, params['experiment_name'])
+    report_path = os.path.join(report_dir, 'selected_samples_report.csv')
+    while num_samples <= max_samples:
         print(f"\n[INFO] === num_samples: {num_samples} ===")
         for run_number in range(runs):
             print(f"[INFO]  Run number: {run_number}")
             random.seed(run_number + num_samples * 1000)
             if with_replacement:
-                selected = random.choices(names, k=num_samples)
+                selected_samples = random.choices(names, k=num_samples)
             else:
                 # Garantee unique combinations without replacement
                 attempts = 0
                 while True:
-                    selected = tuple(sorted(random.sample(names, num_samples)))
-                    if selected not in used_combinations:
-                        used_combinations.add(selected)
+                    selected_samples = tuple(sorted(random.sample(names, num_samples)))
+                    if selected_samples not in used_combinations:
+                        used_combinations.add(selected_samples)
                         break
                     attempts += 1
                     if attempts > 1000:
                         print(f"[WARN] Could not find unique combination for num_samples={num_samples}, run_number={run_number}")
                         break
-            print(f"[INFO]   Selected files: {selected}")
-            params["split_strategy"] = ",".join(selected)
-            # Build the prefix for the run name
+            print(f"[INFO]   Selected files: {selected_samples}")
+            params["split_strategy"] = ",".join(selected_samples)
             prefix = (
-                f"{params['model_class']}_bs:{params['bs_train']}_ep:{params['num_epochs']}"
-                f"_lr:{params['lr']}_lr-decay:{params['lr_decay']}_wd:{params['weight_decay']}"
-                f"_val-metric:{params['validation_metric']}"
+                f"{params['model_class']}_weights_id:{weights_id}"
             )
-            # Define the experiment_dir as output_dir/experiment_name/prefix
-            experiment_dir = os.path.join(output_dir, params['experiment_name'], prefix)
-            # Save the selected names for this run_number
-            save_selected_names(selected, experiment_dir, run_number, num_samples)
-            print(f"[INFO]   Saved selected names to {experiment_dir}/selected_names_run{run_number}_n{num_samples}.csv")
+            # report_rows agora é por rodada
+            report_rows = []
             for rep_idx in range(reps):
-                params["run_name"] = f"{prefix}_run:{run_number}_rep:{rep_idx}_ns:{num_samples}"
+                params["run_name"] = f"{prefix}_run:{run_number+1}_rep:{rep_idx + 1}_ns:{num_samples}"
                 params["seed"] = rep_idx
-                commandline = ' '.join(dict_to_argv(params, ["dataset_path", "dataset_class", "model_class"]))
-                print(f"[INFO]    [rep {rep_idx}] Running: python train.py")
-                os.system(f"python train.py {commandline}")
-            for name in selected:
-                report_rows.append([run_number, num_samples, name])
-        # Step logic: starts with 1, then 2, then step in step
+                params["wandb_group"] = f"{params['model_class']} | lr:{params['lr']} | weights_id:{weights_id} | n_samples:{num_samples}"
+                command_args = ["python", "train.py"] + dict_to_argv(params, ["dataset_path", "dataset_class", "model_class"])
+                print(f"[INFO]    [rep {rep_idx}] Running: {' '.join(command_args)}")
+                subprocess.run(command_args)
+                for name in selected_samples:
+                    report_rows.append([
+                        params["wandb_group"], num_samples, run_number+1, rep_idx+1, name
+                    ])
+            # Salva o relatório global apenas com os registros da rodada
+            save_report(report_path, report_rows)
+            print(f"[INFO]   Saved global report to {report_path}")
         if num_samples == 1:
             num_samples += 1
         else:
             num_samples += step
-    # Salva o relatório único ao final
-    report_path = os.path.join(output_dir, params['experiment_name'], 'selected_names_report.csv')
-    save_selected_names_report(report_path, report_rows)
-    print(f"[INFO]   Saved global report to {report_path}")
 
 def load_params_from_yaml(yaml_path):
     """
@@ -148,5 +139,6 @@ if __name__ == "__main__":
         reps=experiment_params.get('reps', 5),
         with_replacement=experiment_params.get('with_replacement', False),
         output_dir=experiment_params.get('output_dir', 'runs'),
-        step=experiment_params.get('step', 1)
+        step=experiment_params.get('step', 1),
+        weights_id=experiment_params.get('weights_id', None)
     )
