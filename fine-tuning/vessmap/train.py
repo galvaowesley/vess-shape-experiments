@@ -3,7 +3,7 @@ from torchtrainer.train import DefaultTrainer
 import torch.nn as nn
 import torch
 import segmentation_models_pytorch as smp
-from dataset import get_dataset_vessmap_train
+from dataset import get_dataset_vessmap_train, get_dataset_drive_train
 
 
 class VesselTrainer(DefaultTrainer):
@@ -67,7 +67,11 @@ class VesselTrainer(DefaultTrainer):
         
         if dataset_class == "vessmap_few":
             ds_train, ds_valid, *dataset_props = get_dataset_vessmap_train(dataset_path, split_strategy)
-            class_weights, ignore_index, collate_fn = dataset_props        
+            class_weights, ignore_index, collate_fn = dataset_props  
+        if dataset_class == "drive_few":
+            ds_train, ds_valid, class_weights, ignore_index, collate_fn = get_dataset_drive_train(
+                dataset_path, split_strategy, resize_size=resize_size
+            )      
        
         return ds_train, ds_valid, class_weights, ignore_index, collate_fn
 

@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 
 import torch
-from torchtrainer.datasets.vessel_base import VessMAP
+from torchtrainer.datasets.vessel_base import VessMAP, DRIVE
 from torchtrainer.util.train_util import Subset
 from torchvision import tv_tensors
 from torchvision.transforms import v2 as tv_transf
@@ -86,7 +86,7 @@ class ValidTransforms:
 def get_dataset_vessmap_train(
         dataset_path, 
         split_strategy, 
-        resize_size=(256, 256), 
+        resize_size=(512, 512), 
         ):
     """Get the VessMAP dataset for training.
 
@@ -127,6 +127,57 @@ def get_dataset_vessmap_train(
 
     ds_train = VessMAP(dataset_path, keepdim=True, files=train_images)
     ds_valid = VessMAP(dataset_path, keepdim=True, files=valid_images)
+        
+    ds_train.transforms = TrainTransforms(resize_size)
+    ds_valid.transforms = ValidTransforms(resize_size)
+
+    return ds_train, ds_valid, class_weights, ignore_index, collate_fn
+
+
+def get_dataset_drive_train(
+        dataset_path, 
+        split_strategy, 
+        resize_size=(256, 256), 
+        ):
+    """Get the DRIVE dataset for training.
+
+    Parameters
+    ----------
+    dataset_path
+        Path to the dataset root folder
+    split_strategy
+        Strategy to split the dataset. Possible values are:
+        "rand_<split>": Use <split> fraction of the images to validate
+        "file": Use the train.csv and val.csv files to split the dataset
+    resize_size
+        Size to resize the images
+    """
+
+    class_weights = (0.26, 0.74)
+    ignore_index = None
+    collate_fn = None
+
+    dataset_path = Path(dataset_path)
+
+    names_train = split_strategy.split(",")
+
+    ds = DRIVE(dataset_path, keepdim=True)
+
+    train_images = []
+    valid_images = []
+    for image in ds.images:
+        found = False
+        for name in names_train:
+            if name==image.stem:
+                found = True
+            
+        if found:
+            train_images.append(image.name)
+        else:
+            valid_images.append(image.name)   
+
+    ds_train = DRIVE(dataset_path, keepdim=True, files=train_images)
+    ds_valid = DRIVE(dataset_path, keepdim=True, files=valid_images)
         
     ds_train.transforms = TrainTransforms(resize_size)
     ds_valid.transforms = ValidTransforms(resize_size)
