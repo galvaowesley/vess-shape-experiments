@@ -21,6 +21,7 @@ from torchtrainer.util.train_util import (
     seed_worker,
     to_csv_nan,
 )
+from multi_val_dataset import get_datasets
 from tqdm.auto import tqdm
 
 try:
@@ -143,7 +144,7 @@ class MultiTrainer(DefaultTrainer):
         dataset_path = args.dataset_path
         seed_all(args.seed)
 
-        from dataset import get_datasets
+
         ds_train_vessshape, ds_valids, class_weights, ignore_index = get_datasets(dataset_path)
 
         if args.loss_function == "cross_entropy":

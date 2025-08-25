@@ -1,0 +1,53 @@
+# Sessão de parâmetros do treinamento
+train_params:
+  experiment_name: TESTE_TESTE
+  run_name: ''
+  # weights_strategy: /home/wesleygalvao/Documents/vessel-shape-experiments/training/multi-validation/experiments/training_on_auto_vess-shape_multiple_validation/resnet18_ts:50k_bs-train:192_ep:3000_lr:0.01_lr-decay:0.0_wd:0.0_opt:adam_class1:0.10_FP16_original-curves/checkpoint.pt
+  validate_every: 5
+  save_val_imgs: ''
+  val_img_indices: '0 1 2'
+  dataset_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP
+  dataset_class: vessmap_few
+  split_strategy: ''
+  resize_size: '256 256'
+  model_class: resnet18_unet
+  num_epochs: 20
+  validation_metric: Dice
+  maximize_validation_metric: ''
+  bs_train: 8
+  bs_valid: 20
+  weight_decay: 0.0
+  lr: 0.01
+  lr_decay: 1.0
+  ignore_class_weights: ''
+  optimizer: adam
+  num_workers: 12
+  log_wandb: ''
+  wandb_project: TESTE_TESTE
+  wandb_group: ''
+  save_checkpoint: ''
+
+# Sessão de parâmetros dos experimentos em série
+experiment_params:
+  min_samples: 20
+  max_samples: 20
+  runs: 2
+  reps: 2
+  with_replacement: False
+  output_dir: experiments
+  step: 2
+  csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP/train.csv
+  weights_id: A
+  delete_checkpoint: True
+
+# Sessão de parâmetros de teste/inferência
+test_params:
+  run_path: ""
+  dataset_path: "/media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP"
+  dataset_class: "vessmap"
+  model_class: "resnet18_unet"
+  use_amp: ""
+  save_inference_images: ""
+  checkpoint_type: "last"
+  inference_dir_name: "inference_results"
+  
