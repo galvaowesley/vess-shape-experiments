@@ -176,8 +176,8 @@ def get_dataset_drive_train(
         else:
             valid_images.append(image.name)   
 
-    ds_train = DRIVE(dataset_path, keepdim=True, files=train_images)
-    ds_valid = DRIVE(dataset_path, keepdim=True, files=valid_images)
+    ds_train = DRIVE(dataset_path, keepdim=True, files=train_images, channels="gray")
+    ds_valid = DRIVE(dataset_path, keepdim=True, files=valid_images, channels="gray")
         
     ds_train.transforms = TrainTransforms(resize_size)
     ds_valid.transforms = ValidTransforms(resize_size)
