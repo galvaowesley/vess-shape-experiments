@@ -1,7 +1,8 @@
 # Section of training parameters
 train_params:
-  # experiment_name: multi_train_scratch_on_vessmap_resnet18_A
-  experiment_name: multi_train_scratch_on_vessmap_resnet50_A
+  # experiment_name: multi_finetune_on_vessmap_resnet18_A
+  experiment_name: multi_finetune_on_vessmap_resnet50_A
+  weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
   run_name: ''
   validate_every: 5
   save_val_imgs: ''
@@ -24,8 +25,8 @@ train_params:
   optimizer: adam
   num_workers: 12
   log_wandb: ''
-  # wandb_project: multi_train_scratch_on_vessmap_resnet18_A
-  wandb_project: multi_train_scratch_on_vessmap_resnet50_A
+  # wandb_project: multi_finetune_on_vessmap_resnet18_A
+  wandb_project: multi_finetune_on_vessmap_resnet50_A
   wandb_group: ''
   # suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
@@ -34,8 +35,8 @@ train_params:
 experiment_params:
   min_samples: 1
   max_samples: 20
-  runs: 2
-  reps: 2
+  runs: 5
+  reps: 3
   with_replacement: False
   output_dir: experiments
   step: 2
