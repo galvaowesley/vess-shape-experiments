@@ -1,4 +1,4 @@
-# Vessel Shape Experiments
+# VessShape Experiments
 
 This repository contains experiments and scripts for vessel shape analysis and related machine learning workflows. It is organized to facilitate training, fine-tuning, and testing of models using vessel shape datasets.
 
