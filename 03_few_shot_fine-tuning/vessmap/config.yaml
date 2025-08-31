@@ -1,7 +1,7 @@
 # Section of training parameters
 train_params:
-  # experiment_name: multi_finetune_on_vessmap_resnet18_A
-  experiment_name: multi_finetune_on_vessmap_resnet50_A
+  experiment_name: multi_finetune_on_vessmap_resnet18_A
+  # experiment_name: multi_finetune_on_vessmap_resnet50_A
   weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
   run_name: ''
   validate_every: 5
@@ -12,8 +12,8 @@ train_params:
   split_strategy: ''
   resize_size: '256 256'
   # model_class: resnet18_unet
-  model_class: resnet50_unet
-  num_epochs: 300
+  model_class: resnet18_unet
+  num_epochs: 20
   validation_metric: Dice
   maximize_validation_metric: ''
   bs_train: 8
@@ -25,15 +25,16 @@ train_params:
   optimizer: adam
   num_workers: 12
   log_wandb: ''
-  # wandb_project: multi_finetune_on_vessmap_resnet18_A
-  wandb_project: multi_finetune_on_vessmap_resnet50_A
-  wandb_group: ''
-  # suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
+  wandb_project: multi_finetune_on_vessmap_resnet18_A
+  #wandb_project: multi_finetune_on_vessmap_resnet50_A
+  wandb_group: ''  
+  #suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
+  checkpoint_every: -1 # Save checkpoints every last epoch
 
 # Section of parameters for experiments in series
 experiment_params:
-  min_samples: 1
+  min_samples: 20
   max_samples: 20
   runs: 5
   reps: 3
@@ -43,6 +44,10 @@ experiment_params:
   csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP/train.csv
   weights_id: A
   delete_checkpoint: True
+  # Run inference only after finishing all runs*reps of each num_samples value
+  batch_inference: True
+  # Master switch to enable/disable any inference without removing test_params
+  enable_inference: True
 
 # Section of parameters for test/inference
 test_params:
@@ -50,7 +55,7 @@ test_params:
   dataset_path: "/media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP"
   dataset_class: vessmap
   #model_class: resnet18_unet
-  model_class: resnet50_unet
+  model_class: resnet18_unet
   use_amp: ""
   save_inference_images: ""
   checkpoint_type: "last"

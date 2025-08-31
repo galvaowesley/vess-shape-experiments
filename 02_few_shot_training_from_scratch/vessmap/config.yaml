@@ -27,8 +27,9 @@ train_params:
   #wandb_project: multi_train_scratch_on_vessmap_resnet18
   wandb_project: multi_train_scratch_on_vessmap_resnet50
   wandb_group: ''
-  # suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
+  #suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
+  checkpoint_every: -1 # Save checkpoints every last epoch
 
 # Section of parameters for experiments in series
 experiment_params:

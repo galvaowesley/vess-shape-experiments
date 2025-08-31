@@ -21,5 +21,7 @@ if __name__ == "__main__":
         step=experiment_params.get('step', 1),
         weights_id=experiment_params.get('weights_id', None),
         test_params=test_params,
-        delete_checkpoint=experiment_params.get('delete_checkpoint', False)
-)
+        delete_checkpoint=experiment_params.get('delete_checkpoint', False),
+        batch_inference=experiment_params.get('batch_inference', False),
+        enable_inference=experiment_params.get('enable_inference', True),
+    )
