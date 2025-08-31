@@ -43,6 +43,11 @@ experiment_params:
   csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP/train.csv
   weights_id: FromScratch
   delete_checkpoint: True
+  # Run inference only after finishing all runs*reps of each num_samples value
+  batch_inference: True
+  # Master switch to enable/disable any inference without removing test_params
+  enable_inference: True
+  
 
 # Section of parameters for test/inference
 test_params:
