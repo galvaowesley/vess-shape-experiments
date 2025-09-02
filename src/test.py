@@ -55,7 +55,7 @@ def test(param_dict=None):
         from torchtrainer.datasets.vessel import get_dataset_drive_test
 
         ds_train, ds_test, *dataset_props = get_dataset_drive_test(
-            dataset_path, "default", resize_size=resize_size, **dataset_params)
+            dataset_path, "default", resize_size=resize_size, channels='gray', **dataset_params)
         class_weights, ignore_index = dataset_props
     elif dataset_class == "vessmap":
         from torchtrainer.datasets.vessel import get_dataset_vessmap_train
