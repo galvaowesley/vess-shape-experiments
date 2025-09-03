@@ -43,11 +43,7 @@ experiment_params:
   step: 2
   csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DRIVE/train.csv
   weights_id: A
-  delete_checkpoint: True
-  # Run inference only after finishing all runs*reps of each num_samples value
-  batch_inference: True
-  # Master switch to enable/disable any inference without removing test_params
-  enable_inference: True
+  # (inference orchestration flags moved to test_params)
 
 # Section of parameters for test/inference
 test_params:
@@ -60,4 +56,13 @@ test_params:
   save_inference_images: ""
   checkpoint_type: "last"
   inference_dir_name: "inference_results"
+  # Inference orchestration controls (moved from experiment_params)
+  delete_checkpoint: True
+  batch_inference: True
+  enable_inference: True
+  force_headless: True  # Use headless backend for matplotlib in inference subprocess
+  skip_boxplot: True    # Skip boxplot generation in test script
+  max_inference_retries: 1  # Number of retry attempts for failed inference runs
+  delete_only_on_success: True  # Only delete checkpoint if inference succeeded
+  aggregate_inference_means: True  # Append mean metrics to aggregated CSV
   
