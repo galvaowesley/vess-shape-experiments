@@ -31,6 +31,12 @@ def test(param_dict=None):
 
     args = get_args(param_dict)
 
+    # Configure matplotlib backend early if headless flag is set (flag parsed but not yet used)
+    if getattr(args, 'force_headless', False):
+        # Use Agg backend to avoid any Tkinter / X11 requirements
+        import matplotlib
+        matplotlib.use('Agg')
+
     seed_all(args.seed)
     torch.backends.cudnn.deterministic = args.deterministic
     torch.backends.cudnn.benchmark = args.benchmark
@@ -184,12 +190,15 @@ def test(param_dict=None):
     stats_df = stats_df.drop("count")
 
     # Create persistent data
-    inference_path = Path(run_path) / "inference_results"
+    # Use provided inference_dir_name (default 'inference_results').
+    # NOTE: Orquestrador (few_shot_train.py) assume 'inference_results' ao validar.
+    # Alterar o nome exige atualizar a lógica de validação/agregação.
+    inference_path = Path(run_path) / args.inference_dir_name
     shutil.rmtree(inference_path, ignore_errors=True)
     Path.mkdir(inference_path)
 
     if args.save_inference_images:
-        inference_images_path = Path(run_path) / args.inference_dir_name / "inferences"
+        inference_images_path = inference_path / "inferences"
         inference_images_path.mkdir(parents=True, exist_ok=True)
 
     for idx, (img, target) in enumerate(pbar):
@@ -239,8 +248,10 @@ def test(param_dict=None):
 
     metrics_df.to_csv(inference_path / "metrics.csv", index_label="image")
     stats_df.to_csv(inference_path / "metrics_stats.csv", index_label="statistic")
-    ax = metrics_df.boxplot()
-    ax.figure.savefig(inference_path / "boxplot.png")
+    if not getattr(args, 'skip_boxplot', False):
+        # Import pyplot only if we'll generate the figure (saves import time in headless massive loops)
+        ax = metrics_df.boxplot()
+        ax.figure.savefig(inference_path / "boxplot.png")
 
     config_dict = vars(args)
     config_dict["threshold"] = threshold
@@ -329,6 +340,12 @@ def get_parser() -> argparse.ArgumentParser:
                        help="If deterministic algorithms should be used")
     group.add_argument("--benchmark", action="store_true",
                        help="If cuda benchmark should be used")
+
+    # Inference orchestration helper flags (passed via few_shot_train orchestrator)
+    parser.add_argument('--force_headless', action='store_true',
+                        help='If set, use a headless Matplotlib backend (Agg).')
+    parser.add_argument('--skip_boxplot', action='store_true',
+                        help='If set, skip boxplot generation to save time and avoid backend usage.')
 
     return parser
 
