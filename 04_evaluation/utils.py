@@ -4,6 +4,7 @@ import csv
 import yaml
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 import seaborn as sns
 try:
     import plotly.express as px
@@ -171,7 +172,17 @@ def get_experiments_grouped_stats(df, list_columns, metric_column, agg_funcs):
 
 
 def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_data='num_samples', y_data='Dice',
-                         line_styles: dict | None = None, markers: bool = True):
+                         line_styles: dict | None = None, markers: bool = True, log_x: bool = False,
+                         marker_map: dict | None = None, annotate_zero_shot: bool = False,
+                         share_zero_shot_color_with_scratch: bool = True,
+                         title: str | None = None,
+                         legend_title: str | None = None,
+                         legend_loc: str | tuple | None = None,
+                         save_path: str | None = None,
+                         font_sizes: dict | None = None,
+                         dpi: int = 300,
+                         figsize: tuple | None = (12, 6),
+                         y_limits: tuple | None = None):
     """Plot mean (with sd error bars) of a metric vs number of samples.
 
     Each hue category is drawn separately so we can safely assign different
@@ -185,6 +196,28 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
         y_data: Name of the metric column to aggregate.
         line_styles: Optional dict mapping hue values to valid matplotlib linestyles.
         markers: Whether to plot point markers.
+        log_x: If True, use logarithmic scale on x axis (base 10).
+        marker_map: Optional dict mapping hue values to matplotlib marker symbols.
+            Se None, aplica regra: categorias contendo 'zero-shot' (case-insensitive)
+            usam '*', demais 'o'.
+        annotate_zero_shot: Se True, escreve o rótulo da categoria acima de cada ponto
+            das séries zero-shot.
+        share_zero_shot_color_with_scratch: Se True, pontos/série zero-shot herdam a cor
+            do respectivo modelo treinado "from scratch" (mesmo ResNetXX). Busca por
+            categorias que contenham 'scratch' (case-insensitive) e que compartilhem o
+            identificador do modelo (ex: 'ResNet18').
+        title: Título customizável. Use '' para não exibir título. Se None, usa o padrão
+            "{dataset_name} - {y_data} by {x_data} and {hue}".
+    legend_title: Título da legenda. Se None, usa o nome da coluna hue. Se '' (string vazia), não exibe título.
+    legend_loc: Posição da legenda (matplotlib). Aceita valores como 'best', 'upper right', 'lower left', etc.
+        Especiais: 'outside-right' (fora à direita), 'outside-top', 'outside-bottom'.
+        Também aceita tupla (x, y) em coordenadas do eixo via bbox_to_anchor.
+        save_path: Caminho para salvar a figura (extensões suportadas: .png, .jpg, .jpeg, .pdf, .svg).
+        font_sizes: Dict com tamanhos das fontes. Chaves suportadas: 'xlabel', 'ylabel', 'xaxis', 'yaxis', 'title', 'legend',
+            'zero_shot_annotation' (tamanho da fonte da anotação), 'zero_shot_marker' (tamanho do símbolo zero-shot).
+    dpi: DPI ao salvar (matplotlib).
+    figsize: Tamanho da figura em polegadas (largura, altura). Default (12, 6).
+    y_limits: Tupla opcional (ymin, ymax) para fixar os limites do eixo Y.
     """
     if hue not in dataframe.columns:
         raise ValueError(f"Hue column '{hue}' not found. Columns: {list(dataframe.columns)}")
@@ -194,7 +227,10 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
         raise ValueError(f"y_data column '{y_data}' not found. Columns: {list(dataframe.columns)}")
 
     df = dataframe.copy()
-    plt.figure(figsize=(12, 6))
+    # Tamanho da figura
+    if figsize is None:
+        figsize = (12, 6)
+    plt.figure(figsize=figsize)
 
     unique_vals = [v for v in df[hue].dropna().unique()]
     if not unique_vals:
@@ -207,6 +243,29 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
     palette = sns.color_palette(n_colors=len(unique_vals))
     color_map = {val: palette[i] for i, val in enumerate(unique_vals)}
 
+    if share_zero_shot_color_with_scratch:
+        # Funções auxiliares
+        def _is_scratch(name: str) -> bool:
+            return 'scratch' in str(name).lower()
+        def _is_zero_shot(name: str) -> bool:
+            return 'zero-shot' in str(name).lower()
+        def _model_id(name: str):
+            m = re.search(r'(resnet\d+)', str(name), flags=re.IGNORECASE)
+            return m.group(1).lower() if m else None
+        # Mapeia modelo -> cor do scratch
+        scratch_color_by_model = {}
+        for val in unique_vals:
+            if _is_scratch(val):
+                mid = _model_id(val)
+                if mid and mid not in scratch_color_by_model:
+                    scratch_color_by_model[mid] = color_map[val]
+        # Atribui cor aos zero-shot
+        for val in unique_vals:
+            if _is_zero_shot(val):
+                mid = _model_id(val)
+                if mid and mid in scratch_color_by_model:
+                    color_map[val] = scratch_color_by_model[mid]
+
     # Aggregate: mean and std per (hue, x)
     grouped = df.groupby([hue, x_data])[y_data].agg(['mean', 'std']).reset_index()
 
@@ -214,37 +273,139 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
         sub = grouped[grouped[hue] == val]
         ls = line_styles.get(val, '-')
         color = color_map[val]
-        marker_style = 'o' if markers else None
-        plt.plot(sub[x_data], sub['mean'], linestyle=ls, marker=marker_style, color=color, label=val)
+        is_zero = 'zero-shot' in str(val).lower()
+        if markers:
+            if marker_map is not None:
+                marker_style = marker_map.get(val, 'o')
+            else:
+                marker_style = '*' if is_zero else 'o'
+        else:
+            marker_style = None
+        # Ocultar zero-shot na legenda quando anotado
+        label_val = val
+        if annotate_zero_shot and is_zero:
+            label_val = '_nolegend_'
+        plt_kwargs = {}
+        z_ms = (font_sizes or {}).get('zero_shot_marker')
+        if is_zero and z_ms is not None:
+            plt_kwargs['markersize'] = z_ms
+        plt.plot(sub[x_data], sub['mean'], linestyle=ls, marker=marker_style, color=color, label=label_val, **plt_kwargs)
         # Error band (std)
         if 'std' in sub and not sub['std'].isna().all():
             plt.fill_between(sub[x_data], sub['mean'] - sub['std'], sub['mean'] + sub['std'],
                              color=color, alpha=0.15, linewidth=0)
+        # Anotações para zero-shot
+        if annotate_zero_shot and is_zero:
+            # Ajusta label com quebra de linha após 'zero-shot'
+            display_val = re.sub(r'(zero-shot)\s*', lambda m: m.group(1) + '\n', str(val), flags=re.IGNORECASE)
+            ann_fs = (font_sizes or {}).get('zero_shot_annotation', 9)
+            for xi, yi in zip(sub[x_data], sub['mean']):
+                plt.text(xi, yi + 0.005, display_val, ha='center', va='bottom', fontsize=ann_fs, color=color,
+                         rotation=0, clip_on=True)
 
-    plt.title(f'{dataset_name} - Mean {y_data} by {x_data} and {hue}')
-    plt.xlabel('Number of Samples')
-    plt.ylabel(f'Mean {y_data}')
-    plt.legend(title=hue)
+    # Rótulos e título
+    default_title = f'{dataset_name} - {y_data} by {x_data} and {hue}'
+    title_to_set = default_title if title is None else (title if title != '' else None)
+    if title_to_set:
+        plt.title(title_to_set, fontsize=(font_sizes or {}).get('title'))
+    plt.xlabel('# of labeled examples', fontsize=(font_sizes or {}).get('xlabel'))
+    plt.ylabel(f'{y_data}', fontsize=(font_sizes or {}).get('ylabel'))
+
+    # Título da legenda
+    if legend_title is None:
+        legend_title_arg = hue
+    elif legend_title == '':
+        legend_title_arg = None
+    else:
+        legend_title_arg = legend_title
+
+    # Construção da legenda com controle de posição
+    legend_kwargs = {'title': legend_title_arg}
+    if legend_loc is None:
+        leg = plt.legend(**legend_kwargs)
+    else:
+        loc_value = legend_loc
+        bbox = None
+        if isinstance(legend_loc, str):
+            loc_key = legend_loc.strip().lower().replace('_', '-').replace('centre', 'center')
+            if loc_key in {'outside-right', 'right-outside'}:
+                # Fora à direita, vertical central
+                loc_value = 'center left'
+                bbox = (1.02, 0.5)
+            elif loc_key in {'outside-top', 'top-outside'}:
+                loc_value = 'lower center'
+                bbox = (0.5, 1.02)
+            elif loc_key in {'outside-bottom', 'bottom-outside'}:
+                loc_value = 'upper center'
+                bbox = (0.5, -0.02)
+            else:
+                # Usa diretamente valores válidos do matplotlib (best, upper right, etc.)
+                bbox = None
+        elif isinstance(legend_loc, (tuple, list)) and len(legend_loc) == 2:
+            # Coordenadas customizadas com bbox_to_anchor
+            loc_value = 'upper left'
+            bbox = (float(legend_loc[0]), float(legend_loc[1]))
+        if bbox is not None:
+            leg = plt.legend(loc=loc_value, bbox_to_anchor=bbox, borderaxespad=0., **legend_kwargs)
+        else:
+            leg = plt.legend(loc=loc_value, **legend_kwargs)
+    if leg and (font_sizes or {}).get('legend'):
+        leg.set_title(leg.get_title().get_text())
+        for txt in leg.get_texts():
+            txt.set_fontsize((font_sizes or {}).get('legend'))
+        leg.get_title().set_fontsize((font_sizes or {}).get('legend'))
     plt.grid(True, linestyle=':')
     plt.tight_layout()
 
-    # Adjust x-axis tick spacing using provided x_data. Fallbacks for legacy column names.
-    candidate_cols = [x_data, 'samples', 'num_samples']
-    col_found = None
-    for c in candidate_cols:
-        if c in dataframe.columns:
-            col_found = c
-            break
-    if col_found is not None and pd.api.types.is_numeric_dtype(dataframe[col_found]):
-        try:
-            max_x = int(dataframe[col_found].max())
-            step = 2 if max_x >= 8 else 1
-            plt.xticks(range(0, max_x + 1, step))
-        except ValueError:
-            pass  # silently skip tick customization if conversion fails
+    if log_x:
+        # Validate positive values
+        if (df[x_data] <= 0).any():
+            print("[WARN] Non-positive x values found; cannot apply log scale. Keeping linear scale.")
+        else:
+            plt.xscale('log', base=10)
+            # Optional: minor grid for log
+            plt.grid(True, which='both', axis='x', linestyle=':', alpha=0.4)
     else:
-        print(f"[WARN] x-axis column not found or non-numeric among: {candidate_cols}. Skipping custom ticks.")
+        # Adjust x-axis tick spacing using provided x_data. Fallbacks for legacy column names.
+        candidate_cols = [x_data, 'samples', 'num_samples']
+        col_found = None
+        for c in candidate_cols:
+            if c in dataframe.columns:
+                col_found = c
+                break
+        if col_found is not None and pd.api.types.is_numeric_dtype(dataframe[col_found]):
+            try:
+                max_x = int(dataframe[col_found].max())
+                step = 2 if max_x >= 8 else 1
+                plt.xticks(range(0, max_x + 1, step))
+            except ValueError:
+                pass  # silently skip tick customization if conversion fails
+        else:
+            print(f"[WARN] x-axis column not found or non-numeric among: {candidate_cols}. Skipping custom ticks.")
 
+    # Formatação do eixo Y com 2 casas decimais
+    ax = plt.gca()
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+    # Limites opcionais do eixo Y
+    if y_limits is not None and isinstance(y_limits, (tuple, list)) and len(y_limits) == 2:
+        try:
+            ymin, ymax = float(y_limits[0]), float(y_limits[1])
+            ax.set_ylim((ymin, ymax))
+        except Exception:
+            pass
+    # Tamanho dos ticks
+    if font_sizes:
+        if font_sizes.get('xaxis'):
+            ax.tick_params(axis='x', labelsize=font_sizes.get('xaxis'))
+        if font_sizes.get('yaxis'):
+            ax.tick_params(axis='y', labelsize=font_sizes.get('yaxis'))
+
+    # Salvar figura, se solicitado
+    if save_path:
+        try:
+            plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+        except Exception as e:
+            print(f"[WARN] Falha ao salvar figura em {save_path}: {e}")
     plt.show()
 
 
@@ -363,7 +524,16 @@ def aggregate_inference_means(experiments_root: str, output_csv: str | None = No
 def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMap',
                             hue: str = 'model_type', x_data: str = 'num_samples',
                             y_data: str = 'Dice', line_styles: dict | None = None,
-                            markers: bool = True, show: bool = True):
+                            markers: bool = True, show: bool = True, log_x: bool = False,
+                            symbol_map: dict | None = None, annotate_zero_shot: bool = False,
+                            share_zero_shot_color_with_scratch: bool = True,
+                            title: str | None = None,
+                            legend_title: str | None = None,
+                            legend_loc: str | tuple | None = None,
+                            save_path: str | None = None,
+                            font_sizes: dict | None = None,
+                            figsize: tuple | None = (12, 6),
+                            y_limits: tuple | None = None):
     """Interactive version of plot_mean_dice_score using Plotly Express.
 
     Aggregates mean/std of y_data grouped by (hue, x_data) and plots lines with
@@ -379,6 +549,13 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
             'solid', 'dash', 'dot', 'dashdot', 'longdash', 'longdashdot'.
         markers: Whether to include markers on lines.
         show: If True, immediately display (fig.show()).
+        log_x: If True, use log scale on x axis (base 10).
+        symbol_map: Optional mapping hue-> plotly marker symbol. Se None, regras:
+            'zero-shot' (case-insensitive) => 'star', senão 'circle'.
+        annotate_zero_shot: Se True, adiciona texto sobre os pontos das séries zero-shot.
+        legend_loc: Posição da legenda (plotly). Aceita presets como 'top-right', 'top-left', 'bottom-right', 'bottom-left',
+            'top-center', 'bottom-center', 'center-right', 'center-left', 'center', 'outside-right'.
+            Também aceita tupla (x, y) no intervalo [0,1] para posicionamento customizado.
 
     Returns:
         plotly.graph_objects.Figure
@@ -392,6 +569,35 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
     df = dataframe.copy()
     grouped = df.groupby([hue, x_data])[y_data].agg(['mean', 'std']).reset_index()
     grouped = grouped.rename(columns={'mean': f'mean_{y_data}', 'std': f'std_{y_data}'})
+
+    # Construir mapa de cores garantindo compartilhamento zero-shot/scratch se solicitado
+    unique_vals = list(grouped[hue].unique())
+    if px is None:
+        base_palette = []
+    else:
+        # Usa paleta padrão do Plotly
+        base_palette = px.colors.qualitative.Plotly
+    color_map = {val: base_palette[i % len(base_palette)] if base_palette else None for i, val in enumerate(unique_vals)}
+
+    if share_zero_shot_color_with_scratch:
+        def _is_scratch(name: str) -> bool:
+            return 'scratch' in str(name).lower()
+        def _is_zero_shot(name: str) -> bool:
+            return 'zero-shot' in str(name).lower()
+        def _model_id(name: str):
+            m = re.search(r'(resnet\d+)', str(name), flags=re.IGNORECASE)
+            return m.group(1).lower() if m else None
+        scratch_color_by_model = {}
+        for val in unique_vals:
+            if _is_scratch(val):
+                mid = _model_id(val)
+                if mid and mid not in scratch_color_by_model:
+                    scratch_color_by_model[mid] = color_map[val]
+        for val in unique_vals:
+            if _is_zero_shot(val):
+                mid = _model_id(val)
+                if mid and mid in scratch_color_by_model:
+                    color_map[val] = scratch_color_by_model[mid]
 
     # Default line styles cycling
     if line_styles is None:
@@ -411,6 +617,27 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
             return 'solid'
         return dash_map.get(style, style)  # leave custom sequences untouched
 
+    # Preparar coluna de símbolo se necessário
+    symbol_col = None
+    if markers:
+        if symbol_map is None:
+            # construir automaticamente
+            auto_map = {}
+            for v in grouped[hue].unique():
+                auto_map[v] = 'star' if 'zero-shot' in str(v).lower() else 'circle'
+            symbol_map = auto_map
+        # Criar coluna auxiliar
+        symbol_col = '_plot_symbol'
+        grouped[symbol_col] = grouped[hue].map(symbol_map).fillna('circle')
+        # Controlar tamanho do símbolo zero-shot, se fornecido
+        zs_ms = (font_sizes or {}).get('zero_shot_marker') if font_sizes else None
+        if zs_ms is not None:
+            # Cria uma coluna de tamanho por ponto: aplica para zero-shot, None/NaN para outros
+            size_col = '_plot_size'
+            grouped[size_col] = grouped[hue].apply(lambda v: zs_ms if ('zero-shot' in str(v).lower()) else None)
+        else:
+            size_col = None
+
     fig = px.line(
         grouped,
         x=x_data,
@@ -418,8 +645,11 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
         color=hue,
         line_dash=hue,
         markers=markers,
-        error_y=f'std_{y_data}',
-        title=f'{dataset_name} - Mean {y_data} by {x_data} and {hue}'
+        symbol=symbol_col if symbol_col else None,
+    error_y=f'std_{y_data}',
+        title=None,
+        log_x=log_x,
+        color_discrete_map=color_map
     )
 
     # Apply custom dash styles
@@ -428,19 +658,124 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
             val = trace.name
             if val in line_styles:
                 trace.update(line={'dash': _normalize_dash(line_styles[val])})
+            # Anotação zero-shot: adicionar texto (apenas uma vez por ponto)
+            if annotate_zero_shot and 'zero-shot' in str(val).lower():
+                # Se já não estiver em modo texto, acrescenta
+                mode = trace.mode or 'lines'
+                if 'text' not in mode:
+                    trace.update(mode=mode + '+text')
+                # Mostrar label apenas acima dos pontos (mesmo texto para cada ponto)
+                n_pts = len(trace.x)
+                display_val = re.sub(r'(zero-shot)\s*', lambda m: m.group(1) + '<br>', str(val), flags=re.IGNORECASE)
+                ann_fs = (font_sizes or {}).get('zero_shot_annotation', 10)
+                trace.update(text=[display_val]*n_pts, textposition='top center', textfont={'size':ann_fs})
+                # Não mostrar na legenda
+                trace.update(showlegend=False)
+
+            # Ajustar tamanho do símbolo zero-shot para a série
+            zs_ms = (font_sizes or {}).get('zero_shot_marker') if font_sizes else None
+            if zs_ms is not None and getattr(trace, 'marker', None) is not None:
+                if 'zero-shot' in str(val).lower():
+                    trace.update(marker=dict(size=zs_ms))
+
+    # Título
+    default_title = f'{dataset_name} - {y_data} by {x_data} and {hue}'
+    title_to_set = default_title if title is None else (title if title != '' else None)
+
+    # Converter figsize (polegadas) para pixels (~96 px/inch) para Plotly
+    width_px = height_px = None
+    if figsize:
+        try:
+            width_px = int(figsize[0] * 96)
+            height_px = int(figsize[1] * 96)
+        except Exception:
+            width_px = height_px = None
+
+    # Título da legenda (None => usa hue; '' => remove)
+    legend_title_arg = hue if legend_title is None else (legend_title if legend_title != '' else None)
 
     fig.update_layout(
         template='plotly_white',
         xaxis_title='Number of Samples',
-        yaxis_title=f'Mean {y_data}',
-        legend_title=hue,
+        yaxis_title=f'{y_data}',
+        legend_title=legend_title_arg,
+        title=title_to_set,
+        width=width_px,
+        height=height_px
     )
+    # Posição da legenda (plotly)
+    if legend_loc is not None:
+        x = y = None
+        xanchor = 'center'
+        yanchor = 'middle'
+        if isinstance(legend_loc, (tuple, list)) and len(legend_loc) == 2:
+            try:
+                x, y = float(legend_loc[0]), float(legend_loc[1])
+            except Exception:
+                x = y = None
+        elif isinstance(legend_loc, str):
+            key = legend_loc.strip().lower().replace('_', '-').replace('centre', 'center')
+            mapping = {
+                'top-right':   (1.0, 1.0, 'right', 'top'),
+                'upper right': (1.0, 1.0, 'right', 'top'),
+                'top-left':    (0.0, 1.0, 'left',  'top'),
+                'upper left':  (0.0, 1.0, 'left',  'top'),
+                'bottom-right':(1.0, 0.0, 'right', 'bottom'),
+                'lower right': (1.0, 0.0, 'right', 'bottom'),
+                'bottom-left': (0.0, 0.0, 'left',  'bottom'),
+                'lower left':  (0.0, 0.0, 'left',  'bottom'),
+                'top-center':  (0.5, 1.0, 'center','top'),
+                'bottom-center':(0.5,0.0,'center','bottom'),
+                'center-right':(1.0, 0.5, 'right', 'middle'),
+                'center-left': (0.0, 0.5, 'left',  'middle'),
+                'center':      (0.5, 0.5, 'center','middle'),
+                'outside-right':(1.02, 1.0, 'left', 'top')
+            }
+            if key in mapping:
+                x, y, xanchor, yanchor = mapping[key]
+        if x is not None and y is not None:
+            fig.update_layout(legend=dict(x=x, y=y, xanchor=xanchor, yanchor=yanchor))
+    # Formatar y com 2 casas decimais
+    fig.update_yaxes(tickformat='.2f')
+    # Limites opcionais do eixo Y
+    if y_limits is not None and isinstance(y_limits, (tuple, list)) and len(y_limits) == 2:
+        try:
+            ymin, ymax = float(y_limits[0]), float(y_limits[1])
+            fig.update_yaxes(range=[ymin, ymax])
+        except Exception:
+            pass
+
+    # Tamanhos de fonte
+    if font_sizes:
+        if font_sizes.get('xlabel'):
+            fig.update_layout(xaxis_title_font=dict(size=font_sizes.get('xlabel')))
+        if font_sizes.get('ylabel'):
+            fig.update_layout(yaxis_title_font=dict(size=font_sizes.get('ylabel')))
+        if font_sizes.get('xaxis'):
+            fig.update_xaxes(tickfont=dict(size=font_sizes.get('xaxis')))
+        if font_sizes.get('yaxis'):
+            fig.update_yaxes(tickfont=dict(size=font_sizes.get('yaxis')))
+        if font_sizes.get('title'):
+            fig.update_layout(title_font=dict(size=font_sizes.get('title')))
+        if font_sizes.get('legend'):
+            fig.update_layout(legend_font_size=font_sizes.get('legend'))
 
     # Adjust x ticks if numeric
-    if grouped[x_data].dtype.kind in 'iuf':
+    if not log_x and grouped[x_data].dtype.kind in 'iuf':
         max_x = grouped[x_data].max()
         step = 2 if max_x >= 8 else 1
         fig.update_xaxes(dtick=step)
+    if log_x:
+        if (grouped[x_data] <= 0).any():
+            print('[WARN] Non-positive x values present; log scale may be invalid.')
+
+    # Salvar figura interativa como imagem, se solicitado
+    if save_path:
+        try:
+            # Requer kaleido instalado: pip install -U kaleido
+            fig.write_image(save_path)
+        except Exception as e:
+            print(f"[WARN] Falha ao salvar figura plotly em {save_path}: {e}")
 
     if show:
         fig.show()
