@@ -175,6 +175,7 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
                          line_styles: dict | None = None, markers: bool = True, log_x: bool = False,
                          marker_map: dict | None = None, annotate_zero_shot: bool = False,
                          share_zero_shot_color_with_scratch: bool = True,
+                         share_zero_shot_color_with: str | None = 'finetuned',
                          title: str | None = None,
                          legend_title: str | None = None,
                          legend_loc: str | tuple | None = None,
@@ -202,10 +203,10 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
             usam '*', demais 'o'.
         annotate_zero_shot: Se True, escreve o rótulo da categoria acima de cada ponto
             das séries zero-shot.
-        share_zero_shot_color_with_scratch: Se True, pontos/série zero-shot herdam a cor
-            do respectivo modelo treinado "from scratch" (mesmo ResNetXX). Busca por
-            categorias que contenham 'scratch' (case-insensitive) e que compartilhem o
-            identificador do modelo (ex: 'ResNet18').
+        share_zero_shot_color_with_scratch: [DEPRECATED] Mantido por compatibilidade; use
+            'share_zero_shot_color_with'.
+        share_zero_shot_color_with: Estratégia de cor herdada para séries zero-shot.
+            Opções: 'finetuned' (padrão), 'scratch' ou None (não herda).
         title: Título customizável. Use '' para não exibir título. Se None, usa o padrão
             "{dataset_name} - {y_data} by {x_data} and {hue}".
     legend_title: Título da legenda. Se None, usa o nome da coluna hue. Se '' (string vazia), não exibe título.
@@ -243,28 +244,35 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
     palette = sns.color_palette(n_colors=len(unique_vals))
     color_map = {val: palette[i] for i, val in enumerate(unique_vals)}
 
-    if share_zero_shot_color_with_scratch:
+    # Estratégia de cor para zero-shot
+    strategy = share_zero_shot_color_with if share_zero_shot_color_with is not None else (
+        'scratch' if share_zero_shot_color_with_scratch else None
+    )
+    if strategy in {'scratch', 'finetuned'}:
         # Funções auxiliares
         def _is_scratch(name: str) -> bool:
             return 'scratch' in str(name).lower()
+        def _is_finetuned(name: str) -> bool:
+            s = str(name).lower()
+            return ('fine-tuned' in s) or ('finetuned' in s) or ('fine tuned' in s)
         def _is_zero_shot(name: str) -> bool:
             return 'zero-shot' in str(name).lower()
         def _model_id(name: str):
             m = re.search(r'(resnet\d+)', str(name), flags=re.IGNORECASE)
             return m.group(1).lower() if m else None
-        # Mapeia modelo -> cor do scratch
-        scratch_color_by_model = {}
+        # Mapeia modelo -> cor base conforme estratégia
+        base_color_by_model = {}
         for val in unique_vals:
-            if _is_scratch(val):
+            if (strategy == 'scratch' and _is_scratch(val)) or (strategy == 'finetuned' and _is_finetuned(val)):
                 mid = _model_id(val)
-                if mid and mid not in scratch_color_by_model:
-                    scratch_color_by_model[mid] = color_map[val]
+                if mid and mid not in base_color_by_model:
+                    base_color_by_model[mid] = color_map[val]
         # Atribui cor aos zero-shot
         for val in unique_vals:
             if _is_zero_shot(val):
                 mid = _model_id(val)
-                if mid and mid in scratch_color_by_model:
-                    color_map[val] = scratch_color_by_model[mid]
+                if mid and mid in base_color_by_model:
+                    color_map[val] = base_color_by_model[mid]
 
     # Aggregate: mean and std per (hue, x)
     grouped = df.groupby([hue, x_data])[y_data].agg(['mean', 'std']).reset_index()
@@ -527,6 +535,7 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
                             markers: bool = True, show: bool = True, log_x: bool = False,
                             symbol_map: dict | None = None, annotate_zero_shot: bool = False,
                             share_zero_shot_color_with_scratch: bool = True,
+                            share_zero_shot_color_with: str | None = 'finetuned',
                             title: str | None = None,
                             legend_title: str | None = None,
                             legend_loc: str | tuple | None = None,
@@ -553,6 +562,10 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
         symbol_map: Optional mapping hue-> plotly marker symbol. Se None, regras:
             'zero-shot' (case-insensitive) => 'star', senão 'circle'.
         annotate_zero_shot: Se True, adiciona texto sobre os pontos das séries zero-shot.
+        share_zero_shot_color_with_scratch: [DEPRECATED] Mantido por compatibilidade; use
+            'share_zero_shot_color_with'.
+        share_zero_shot_color_with: Estratégia de cor herdada para séries zero-shot.
+            Opções: 'finetuned' (padrão), 'scratch' ou None (não herda).
         legend_loc: Posição da legenda (plotly). Aceita presets como 'top-right', 'top-left', 'bottom-right', 'bottom-left',
             'top-center', 'bottom-center', 'center-right', 'center-left', 'center', 'outside-right'.
             Também aceita tupla (x, y) no intervalo [0,1] para posicionamento customizado.
@@ -570,7 +583,7 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
     grouped = df.groupby([hue, x_data])[y_data].agg(['mean', 'std']).reset_index()
     grouped = grouped.rename(columns={'mean': f'mean_{y_data}', 'std': f'std_{y_data}'})
 
-    # Construir mapa de cores garantindo compartilhamento zero-shot/scratch se solicitado
+    # Construir mapa de cores garantindo compartilhamento zero-shot conforme estratégia
     unique_vals = list(grouped[hue].unique())
     if px is None:
         base_palette = []
@@ -579,25 +592,31 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
         base_palette = px.colors.qualitative.Plotly
     color_map = {val: base_palette[i % len(base_palette)] if base_palette else None for i, val in enumerate(unique_vals)}
 
-    if share_zero_shot_color_with_scratch:
+    strategy = share_zero_shot_color_with if share_zero_shot_color_with is not None else (
+        'scratch' if share_zero_shot_color_with_scratch else None
+    )
+    if strategy in {'scratch', 'finetuned'}:
         def _is_scratch(name: str) -> bool:
             return 'scratch' in str(name).lower()
+        def _is_finetuned(name: str) -> bool:
+            s = str(name).lower()
+            return ('fine-tuned' in s) or ('finetuned' in s) or ('fine tuned' in s)
         def _is_zero_shot(name: str) -> bool:
             return 'zero-shot' in str(name).lower()
         def _model_id(name: str):
             m = re.search(r'(resnet\d+)', str(name), flags=re.IGNORECASE)
             return m.group(1).lower() if m else None
-        scratch_color_by_model = {}
+        base_color_by_model = {}
         for val in unique_vals:
-            if _is_scratch(val):
+            if (strategy == 'scratch' and _is_scratch(val)) or (strategy == 'finetuned' and _is_finetuned(val)):
                 mid = _model_id(val)
-                if mid and mid not in scratch_color_by_model:
-                    scratch_color_by_model[mid] = color_map[val]
+                if mid and mid not in base_color_by_model:
+                    base_color_by_model[mid] = color_map[val]
         for val in unique_vals:
             if _is_zero_shot(val):
                 mid = _model_id(val)
-                if mid and mid in scratch_color_by_model:
-                    color_map[val] = scratch_color_by_model[mid]
+                if mid and mid in base_color_by_model:
+                    color_map[val] = base_color_by_model[mid]
 
     # Default line styles cycling
     if line_styles is None:
