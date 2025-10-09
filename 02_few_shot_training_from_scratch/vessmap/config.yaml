@@ -34,7 +34,7 @@ train_params:
 # Section of parameters for experiments in series
 experiment_params:
   min_samples: 1
-  max_samples: 20
+  max_samples: 16
   runs: 5
   reps: 3
   with_replacement: False

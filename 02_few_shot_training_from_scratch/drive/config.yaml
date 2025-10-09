@@ -1,7 +1,6 @@
 # Section of training parameters
 train_params:
-  # experiment_name: multi_train_scratch_on_drive_resnet18
-  experiment_name: teste_inferencia_drive #multi_train_scratch_on_drive_resnet50
+  experiment_name: multi_train_scratch_on_drive_resnet18
   run_name: ''
   validate_every: 5
   save_val_imgs: ''
@@ -10,9 +9,8 @@ train_params:
   dataset_class: drive_few
   split_strategy: ''
   resize_size: '512 512'
-  # model_class: resnet18_unet
-  model_class: resnet50_unet
-  num_epochs: 5
+  model_class: resnet18_unet
+  num_epochs: 1000
   validation_metric: Dice
   maximize_validation_metric: ''
   bs_train: 8
@@ -24,8 +22,7 @@ train_params:
   optimizer: adam
   num_workers: 12
   log_wandb: ''
-  # wandb_project: multi_train_scratch_on_drive_resnet18
-  wandb_project: teste_inferencia_drive #multi_train_scratch_on_drive_resnet50
+  wandb_project: multi_train_scratch_on_drive_resnet18
   wandb_group: ''
   #suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
@@ -33,10 +30,10 @@ train_params:
 
 # Section of parameters for experiments in series
 experiment_params:
-  min_samples: 16
+  min_samples: 1
   max_samples: 16
-  runs: 2
-  reps: 2
+  runs: 5
+  reps: 3
   with_replacement: False
   output_dir: experiments
   step: 2
@@ -49,8 +46,7 @@ test_params:
   run_path: ""
   dataset_path: "/media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DRIVE"
   dataset_class: drive
-  #model_class: resnet18_unet
-  model_class: resnet50_unet
+  model_class: resnet18_unet
   use_amp: ""
   save_inference_images: ""
   checkpoint_type: "last"
