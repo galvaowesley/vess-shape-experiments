@@ -4,12 +4,21 @@ import csv
 import yaml
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FormatStrFormatter
+from matplotlib.ticker import FormatStrFormatter, PercentFormatter
 import seaborn as sns
+from typing import List
+
+
+try:
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes as _mpl_inset_axes
+except Exception:
+    _mpl_inset_axes = None
 try:
     import plotly.express as px
+    import plotly.graph_objects as go
 except ImportError:  # Permite uso do restante mesmo sem plotly
     px = None
+    go = None
 
 
 def get_experiments_raw_stats(multi_finetune_path):
@@ -142,33 +151,17 @@ def get_experiments_test_metrics(multi_finetune_path):
 
 
 # Combined helper removed per user request; use separate functions instead.
+def get_experiments_grouped_stats(df: pd.DataFrame, group_cols: List[str], metrics: List[str]):
+    agg_map = {m: ['mean','std'] for m in metrics}
+    grouped = (df
+               .groupby(group_cols)[metrics]
+               .agg(agg_map)
+              )
+    # Flatten MultiIndex de colunas para formato mean_<metric>, std_<metric>
+    grouped.columns = [f"{stat}_{metric}" for metric, stat in grouped.columns]
+    grouped = grouped.reset_index()
+    return grouped
 
-
-def get_experiments_grouped_stats(df, list_columns, metric_column, agg_funcs):
-    """Group experimental results and compute aggregations.
-
-    Args:
-        df (pd.DataFrame): DataFrame containing experiment results.
-        list_columns (list): Columns to group by.
-        metric_column (str): Metric column to aggregate.
-        agg_funcs (list): Aggregation functions (e.g. ['mean', 'std']).
-    Returns:
-        pd.DataFrame: Aggregated statistics with cleaned column names.
-    """
-    agg_stats = df.groupby(list_columns)[metric_column].agg(agg_funcs).reset_index()
-    # Avoid redundant prefixes in column names
-    def clean_col_name(func, metric_column):
-        # If metric_column already begins with the aggregation name, keep it
-        if metric_column.lower().startswith(func.lower()):
-            return metric_column
-        # Remove duplicated 'mean_' prefix when adding another function
-        if metric_column.lower().startswith('mean_') and func != 'mean':
-            return f"{func}_{metric_column[5:]}"
-        return f"{func}_{metric_column}"
-    agg_stats = agg_stats.rename(columns={func: clean_col_name(func, metric_column) for func in agg_funcs})
-    agg_stats = agg_stats.sort_values(by=list_columns, ascending=False)
-    agg_stats = agg_stats.reset_index(drop=True)
-    return agg_stats
 
 
 def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_data='num_samples', y_data='Dice',
@@ -178,12 +171,28 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
                          share_zero_shot_color_with: str | None = 'finetuned',
                          title: str | None = None,
                          legend_title: str | None = None,
+                         xlabel: str | None = None,
                          legend_loc: str | tuple | None = None,
                          save_path: str | None = None,
                          font_sizes: dict | None = None,
                          dpi: int = 300,
                          figsize: tuple | None = (12, 6),
-                         y_limits: tuple | None = None):
+                         y_limits: tuple | None = None,
+                         x_limits: tuple | None = None,
+                         percentage: bool = False,
+                         main_zero_shift_frac: float | None = 0.0,
+                         main_zero_shift_mode: str | None = 'zero-only',
+                         inset_enabled: bool = False,
+                         inset_x_limits: tuple | None = None,
+                         inset_y_limits: tuple | None = None,
+                         inset_show_axis_labels: bool = False,
+                         inset_x_ticks: list | tuple | None = None,
+                         inset_x_integer_ticks: bool = False,
+                         inset_loc: str | int = 'upper right',
+                         inset_size: tuple | None = None,
+                         inset_bbox: tuple | None = None,
+                         inset_borderpad: float | None = None,
+                         inset_zero_shift_frac: float | None = 0.01):
     """Plot mean (with sd error bars) of a metric vs number of samples.
 
     Each hue category is drawn separately so we can safely assign different
@@ -210,6 +219,7 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
         title: Título customizável. Use '' para não exibir título. Se None, usa o padrão
             "{dataset_name} - {y_data} by {x_data} and {hue}".
     legend_title: Título da legenda. Se None, usa o nome da coluna hue. Se '' (string vazia), não exibe título.
+    xlabel: Rótulo do eixo X. Se None, usa '# of labeled examples'.
     legend_loc: Posição da legenda (matplotlib). Aceita valores como 'best', 'upper right', 'lower left', etc.
         Especiais: 'outside-right' (fora à direita), 'outside-top', 'outside-bottom'.
         Também aceita tupla (x, y) em coordenadas do eixo via bbox_to_anchor.
@@ -219,6 +229,21 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
     dpi: DPI ao salvar (matplotlib).
     figsize: Tamanho da figura em polegadas (largura, altura). Default (12, 6).
     y_limits: Tupla opcional (ymin, ymax) para fixar os limites do eixo Y.
+    x_limits: Tupla opcional (xmin, xmax) para fixar os limites do eixo X.
+    main_zero_shift_frac: Fração do span do X principal para deslocar o eixo principal. 0.0 desativa.
+    main_zero_shift_mode: 'zero-only' (padrão) desloca apenas pontos x==0 das séries zero-shot e remapeia o tick '0'.
+        'global' desloca todas as marcações (dados/ticks/limites) pela mesma quantidade, preservando os rótulos.
+    inset_enabled: Se True, adiciona um inset plot com os mesmos dados.
+    inset_x_limits: Limites do eixo X do inset (xmin, xmax).
+    inset_y_limits: Limites do eixo Y do inset (ymin, ymax).
+    inset_show_axis_labels: Se True, exibe os rótulos dos eixos do inset usando os mesmos textos do gráfico principal.
+    inset_x_ticks: Lista explícita de posições de ticks no X do inset. Se fornecida, substitui o automático.
+    inset_x_integer_ticks: Se True, força apenas ticks inteiros dentro de inset_x_limits.
+    inset_loc: Posição do inset (ex.: 'upper right', 'lower left', 1, 2, ...).
+    inset_size: Frações (w, h) do tamanho do eixo principal; padrão (0.45, 0.35).
+    inset_bbox: Alternativa para posicionamento absoluto no eixo: (x0, y0, w, h) em fração do eixo.
+    inset_borderpad: Espaço entre inset e borda (quando usando inset_loc); default matplotlib se None.
+    inset_zero_shift_frac: Fração do span de X do inset usada para deslocar pontos com x==0 (apenas zero-shot). Default 0.01.
     """
     if hue not in dataframe.columns:
         raise ValueError(f"Hue column '{hue}' not found. Columns: {list(dataframe.columns)}")
@@ -249,17 +274,25 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
         'scratch' if share_zero_shot_color_with_scratch else None
     )
     if strategy in {'scratch', 'finetuned'}:
-        # Funções auxiliares
+        # Funções auxiliares: considerar VSUNet/UNet além de ResNet
         def _is_scratch(name: str) -> bool:
-            return 'scratch' in str(name).lower()
+            s = str(name).lower()
+            # 'scratch' explícito OU UNet simples (evita confundir VSUNet)
+            return ('scratch' in s) or (('unet' in s) and ('vsunet' not in s))
         def _is_finetuned(name: str) -> bool:
             s = str(name).lower()
-            return ('fine-tuned' in s) or ('finetuned' in s) or ('fine tuned' in s)
+            # expressões de fine-tuning OU identificadores VSUNet
+            return (('fine-tuned' in s) or ('finetuned' in s) or ('fine tuned' in s)) or ('vsunet' in s)
         def _is_zero_shot(name: str) -> bool:
             return 'zero-shot' in str(name).lower()
         def _model_id(name: str):
-            m = re.search(r'(resnet\d+)', str(name), flags=re.IGNORECASE)
-            return m.group(1).lower() if m else None
+            s = str(name)
+            # Prioriza VSUNet antes de UNet para evitar capturar 'unet' dentro de 'vsunet'
+            for pat in [r'(resnet\d+)', r'(vsunet\d+)', r'\b(unet\d+)\b']:
+                m = re.search(pat, s, flags=re.IGNORECASE)
+                if m:
+                    return m.group(1).lower()
+            return None
         # Mapeia modelo -> cor base conforme estratégia
         base_color_by_model = {}
         for val in unique_vals:
@@ -274,8 +307,32 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
                 if mid and mid in base_color_by_model:
                     color_map[val] = base_color_by_model[mid]
 
+    # Override de cores: VSUNet18 azul, VSUNet50 laranja (inclui Zero-Shot)
+    try:
+        for val in unique_vals:
+            s = str(val).lower()
+            if 'vsunet18' in s:
+                color_map[val] = 'tab:blue'
+            elif 'vsunet50' in s:
+                color_map[val] = 'tab:orange'
+    except Exception:
+        pass
+
     # Aggregate: mean and std per (hue, x)
     grouped = df.groupby([hue, x_data])[y_data].agg(['mean', 'std']).reset_index()
+
+    # Calcular deslocamento no eixo principal (apenas linear)
+    main_zero_offset = None
+    if (main_zero_shift_frac or 0) > 0 and not log_x:
+        try:
+            if x_limits is not None and len(x_limits) == 2:
+                xmin_m, xmax_m = float(x_limits[0]), float(x_limits[1])
+            else:
+                xmin_m, xmax_m = float(df[x_data].min()), float(df[x_data].max())
+            span_m = max(xmax_m - xmin_m, 1e-9)
+            main_zero_offset = 0.0 + float(main_zero_shift_frac) * span_m
+        except Exception:
+            main_zero_offset = None
 
     for val in unique_vals:
         sub = grouped[grouped[hue] == val]
@@ -297,17 +354,29 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
         z_ms = (font_sizes or {}).get('zero_shot_marker')
         if is_zero and z_ms is not None:
             plt_kwargs['markersize'] = z_ms
-        plt.plot(sub[x_data], sub['mean'], linestyle=ls, marker=marker_style, color=color, label=label_val, **plt_kwargs)
+        # Deslocamento conforme modo selecionado
+        x_vals_main = sub[x_data].to_numpy().astype(float).copy()
+        if (main_zero_offset is not None):
+            if (main_zero_shift_mode or 'zero-only').lower().startswith('global'):
+                # deslocar todo eixo
+                x_vals_main = x_vals_main + main_zero_offset
+            elif is_zero:
+                # deslocar apenas zeros das séries zero-shot
+                try:
+                    x_vals_main[x_vals_main == 0.0] = main_zero_offset
+                except Exception:
+                    pass
+        plt.plot(x_vals_main, sub['mean'], linestyle=ls, marker=marker_style, color=color, label=label_val, **plt_kwargs)
         # Error band (std)
         if 'std' in sub and not sub['std'].isna().all():
-            plt.fill_between(sub[x_data], sub['mean'] - sub['std'], sub['mean'] + sub['std'],
+            plt.fill_between(x_vals_main, sub['mean'] - sub['std'], sub['mean'] + sub['std'],
                              color=color, alpha=0.15, linewidth=0)
         # Anotações para zero-shot
         if annotate_zero_shot and is_zero:
             # Ajusta label com quebra de linha após 'zero-shot'
             display_val = re.sub(r'(zero-shot)\s*', lambda m: m.group(1) + '\n', str(val), flags=re.IGNORECASE)
             ann_fs = (font_sizes or {}).get('zero_shot_annotation', 9)
-            for xi, yi in zip(sub[x_data], sub['mean']):
+            for xi, yi in zip(x_vals_main, sub['mean']):
                 plt.text(xi, yi + 0.005, display_val, ha='center', va='bottom', fontsize=ann_fs, color=color,
                          rotation=0, clip_on=True)
 
@@ -316,8 +385,9 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
     title_to_set = default_title if title is None else (title if title != '' else None)
     if title_to_set:
         plt.title(title_to_set, fontsize=(font_sizes or {}).get('title'))
-    plt.xlabel('# of labeled examples', fontsize=(font_sizes or {}).get('xlabel'))
-    plt.ylabel(f'{y_data}', fontsize=(font_sizes or {}).get('ylabel'))
+    plt.xlabel(xlabel, fontsize=(font_sizes or {}).get('xlabel'))
+    y_label_text = f'{y_data} (%)' if percentage else f'{y_data}'
+    plt.ylabel(y_label_text, fontsize=(font_sizes or {}).get('ylabel'))
 
     # Título da legenda
     if legend_title is None:
@@ -385,15 +455,39 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
             try:
                 max_x = int(dataframe[col_found].max())
                 step = 2 if max_x >= 8 else 1
-                plt.xticks(range(0, max_x + 1, step))
+                ticks = list(range(0, max_x + 1, step))
+                if (main_zero_offset is not None) and (main_zero_shift_mode or 'zero-only').lower().startswith('global'):
+                    mapped = [t + main_zero_offset for t in ticks]
+                    labels = [str(t) for t in ticks]
+                    plt.xticks(mapped, labels)
+                elif main_zero_offset is not None:
+                    # mapear somente o zero
+                    mapped = [(main_zero_offset if t == 0 else t) for t in ticks]
+                    labels = [('0' if t == 0 else str(t)) for t in ticks]
+                    plt.xticks(mapped, labels)
+                else:
+                    plt.xticks(ticks)
             except ValueError:
                 pass  # silently skip tick customization if conversion fails
         else:
             print(f"[WARN] x-axis column not found or non-numeric among: {candidate_cols}. Skipping custom ticks.")
 
-    # Formatação do eixo Y com 2 casas decimais
+    # Formatação do eixo Y
     ax = plt.gca()
-    ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+    if percentage:
+        ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    else:
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+    # Limites opcionais do eixo X
+    if x_limits is not None and isinstance(x_limits, (tuple, list)) and len(x_limits) == 2:
+        try:
+            xmin, xmax = float(x_limits[0]), float(x_limits[1])
+            if (main_zero_offset is not None) and (main_zero_shift_mode or 'zero-only').lower().startswith('global'):
+                ax.set_xlim((xmin + main_zero_offset, xmax + main_zero_offset))
+            else:
+                ax.set_xlim((xmin, xmax))
+        except Exception:
+            pass
     # Limites opcionais do eixo Y
     if y_limits is not None and isinstance(y_limits, (tuple, list)) and len(y_limits) == 2:
         try:
@@ -407,6 +501,162 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
             ax.tick_params(axis='x', labelsize=font_sizes.get('xaxis'))
         if font_sizes.get('yaxis'):
             ax.tick_params(axis='y', labelsize=font_sizes.get('yaxis'))
+
+    # Inset plot opcional
+    if inset_enabled:
+        try:
+            if _mpl_inset_axes is None:
+                raise ImportError('mpl_toolkits.axes_grid1.inset_locator.inset_axes não disponível.')
+            if inset_size is None:
+                inset_w, inset_h = 0.45, 0.35
+            else:
+                inset_w, inset_h = float(inset_size[0]), float(inset_size[1])
+            # Criar eixo do inset: por bbox absoluto (se fornecido) ou por loc
+            if inset_bbox is not None and len(inset_bbox) == 4:
+                try:
+                    x0, y0, ww, hh = [float(v) for v in inset_bbox]
+                    axins = ax.inset_axes([x0, y0, ww, hh])
+                except Exception:
+                    # fallback para loc
+                    if inset_borderpad is not None:
+                        axins = _mpl_inset_axes(ax, width=f"{int(inset_w*100)}%", height=f"{int(inset_h*100)}%", loc=inset_loc, borderpad=float(inset_borderpad))
+                    else:
+                        axins = _mpl_inset_axes(ax, width=f"{int(inset_w*100)}%", height=f"{int(inset_h*100)}%", loc=inset_loc)
+            else:
+                if inset_borderpad is not None:
+                    axins = _mpl_inset_axes(ax, width=f"{int(inset_w*100)}%", height=f"{int(inset_h*100)}%", loc=inset_loc, borderpad=float(inset_borderpad))
+                else:
+                    axins = _mpl_inset_axes(ax, width=f"{int(inset_w*100)}%", height=f"{int(inset_h*100)}%", loc=inset_loc)
+
+            # Calcular deslocamento global para x==0 no inset (se houver série zero-shot)
+            has_zero_shot = any('zero-shot' in str(v).lower() for v in unique_vals)
+            zero_offset = None
+            if has_zero_shot:
+                try:
+                    if inset_x_limits is not None and len(inset_x_limits) == 2:
+                        xmin_i, xmax_i = float(inset_x_limits[0]), float(inset_x_limits[1])
+                    else:
+                        xmin_i, xmax_i = float(df[x_data].min()), float(df[x_data].max())
+                    span_i = max(xmax_i - xmin_i, 1e-9)
+                    frac_i = 0.01 if inset_zero_shift_frac is None else float(inset_zero_shift_frac)
+                    zero_offset = 0.0 + frac_i * span_i
+                except Exception:
+                    zero_offset = None
+            for val in unique_vals:
+                sub = grouped[grouped[hue] == val]
+                ls = line_styles.get(val, '-')
+                color = color_map[val]
+                is_zero = 'zero-shot' in str(val).lower()
+                if markers:
+                    if marker_map is not None:
+                        marker_style = marker_map.get(val, 'o')
+                    else:
+                        marker_style = '*' if is_zero else 'o'
+                else:
+                    marker_style = None
+                plt_kwargs = {}
+                z_ms = (font_sizes or {}).get('zero_shot_marker')
+                if is_zero and z_ms is not None:
+                    plt_kwargs['markersize'] = z_ms
+                # Deslocar pontos x==0 para direita no inset (apenas zero-shot)
+                x_vals_ins = sub[x_data].to_numpy().astype(float).copy()
+                if is_zero and (zero_offset is not None):
+                    try:
+                        x_vals_ins[x_vals_ins == 0.0] = zero_offset
+                    except Exception:
+                        pass
+                axins.plot(x_vals_ins, sub['mean'], linestyle=ls, marker=marker_style, color=color, **plt_kwargs)
+                if 'std' in sub and not sub['std'].isna().all():
+                    axins.fill_between(x_vals_ins, sub['mean'] - sub['std'], sub['mean'] + sub['std'],
+                                       color=color, alpha=0.15, linewidth=0)
+                # Anotações para zero-shot também no inset
+                if annotate_zero_shot and is_zero:
+                    display_val = re.sub(r'(zero-shot)\s*', lambda m: m.group(1) + '\n', str(val), flags=re.IGNORECASE)
+                    ann_fs = (font_sizes or {}).get('zero_shot_annotation', 9)
+                    for xi, yi in zip(x_vals_ins, sub['mean']):
+                        axins.text(xi, yi + 0.005, display_val, ha='center', va='bottom', fontsize=ann_fs, color=color,
+                                   rotation=0, clip_on=True)
+            # Limites do inset
+            if inset_x_limits is not None and len(inset_x_limits) == 2:
+                try:
+                    axins.set_xlim((float(inset_x_limits[0]), float(inset_x_limits[1])))
+                except Exception:
+                    pass
+            if inset_y_limits is not None and len(inset_y_limits) == 2:
+                try:
+                    axins.set_ylim((float(inset_y_limits[0]), float(inset_y_limits[1])))
+                except Exception:
+                    pass
+            # Ticks do inset no eixo X: controle explícito/inteiros e ajuste do tick "0" para zero_offset
+            try:
+                ticks_to_use = None
+                labels_to_use = None
+                if inset_x_ticks is not None:
+                    ticks_to_use = [float(v) for v in inset_x_ticks]
+                elif inset_x_integer_ticks and inset_x_limits is not None and len(inset_x_limits) == 2:
+                    xmin_i, xmax_i = float(inset_x_limits[0]), float(inset_x_limits[1])
+                    import math
+                    start = math.ceil(min(xmin_i, xmax_i))
+                    end = math.floor(max(xmin_i, xmax_i))
+                    ticks_to_use = list(range(start, end + 1))
+                    # Garante inclusão dos limites se forem inteiros exatos
+                    if abs(xmin_i - round(xmin_i)) < 1e-9 and int(round(xmin_i)) not in ticks_to_use:
+                        ticks_to_use = [int(round(xmin_i))] + ticks_to_use
+                    if abs(xmax_i - round(xmax_i)) < 1e-9 and int(round(xmax_i)) not in ticks_to_use:
+                        ticks_to_use = ticks_to_use + [int(round(xmax_i))]
+                if ticks_to_use is not None:
+                    mapped_ticks = []
+                    labels_to_use = []
+                    for t in ticks_to_use:
+                        tv = float(t)
+                        if zero_offset is not None and abs(tv - 0.0) < 1e-9:
+                            mapped_ticks.append(zero_offset)
+                            labels_to_use.append('0')
+                        else:
+                            mapped_ticks.append(tv)
+                            labels_to_use.append(str(int(tv)) if abs(tv - round(tv)) < 1e-9 else f"{tv:.2f}")
+                    axins.set_xticks(mapped_ticks)
+                    axins.set_xticklabels(labels_to_use)
+                elif zero_offset is not None:
+                    # fallback: substitui apenas o tick 0 mantendo os demais
+                    ticks = list(axins.get_xticks())
+                    new_ticks = []
+                    new_labels = []
+                    for t in ticks:
+                        if abs(t - 0.0) < 1e-9:
+                            new_ticks.append(zero_offset)
+                            new_labels.append('0')
+                        else:
+                            new_ticks.append(t)
+                            if abs(t - round(t)) < 1e-9:
+                                new_labels.append(str(int(round(t))))
+                            else:
+                                new_labels.append(f"{t:.2f}")
+                    axins.set_xticks(new_ticks)
+                    axins.set_xticklabels(new_labels)
+            except Exception:
+                pass
+            if percentage:
+                axins.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+            else:
+                axins.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+            # Tamanho dos ticks do inset (se fornecido)
+            if font_sizes:
+                if font_sizes.get('inset_xaxis'):
+                    axins.tick_params(axis='x', labelsize=font_sizes.get('inset_xaxis'))
+                if font_sizes.get('inset_yaxis'):
+                    axins.tick_params(axis='y', labelsize=font_sizes.get('inset_yaxis'))
+            # Rótulos dos eixos do inset (habilitar/desabilitar)
+            if inset_show_axis_labels:
+                axins.set_xlabel(xlabel, fontsize=(font_sizes or {}).get('xlabel'))
+                axins.set_ylabel(f'{y_data}', fontsize=(font_sizes or {}).get('ylabel'))
+            else:
+                # Garante ocultação dos labels, caso algo tenha sido herdado
+                axins.set_xlabel('')
+                axins.set_ylabel('')
+            axins.grid(True, linestyle=':')
+        except Exception as e:
+            print(f"[WARN] Falha ao criar inset plot: {e}")
 
     # Salvar figura, se solicitado
     if save_path:
@@ -542,7 +792,16 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
                             save_path: str | None = None,
                             font_sizes: dict | None = None,
                             figsize: tuple | None = (12, 6),
-                            y_limits: tuple | None = None):
+                            y_limits: tuple | None = None,
+                            x_limits: tuple | None = None,
+                            main_zero_shift_frac: float | None = 0.0,
+                            main_zero_shift_mode: str | None = 'zero-only',
+                            inset_domain: tuple | None = None,
+                            inset_x_limits: tuple | None = None,
+                            inset_y_limits: tuple | None = None,
+                            inset_x_ticks: list | tuple | None = None,
+                            inset_x_integer_ticks: bool = False,
+                            inset_zero_shift_frac: float | None = 0.01):
     """Interactive version of plot_mean_dice_score using Plotly Express.
 
     Aggregates mean/std of y_data grouped by (hue, x_data) and plots lines with
@@ -561,11 +820,21 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
         log_x: If True, use log scale on x axis (base 10).
         symbol_map: Optional mapping hue-> plotly marker symbol. Se None, regras:
             'zero-shot' (case-insensitive) => 'star', senão 'circle'.
-        annotate_zero_shot: Se True, adiciona texto sobre os pontos das séries zero-shot.
+    annotate_zero_shot: Se True, adiciona texto sobre os pontos das séries zero-shot.
         share_zero_shot_color_with_scratch: [DEPRECATED] Mantido por compatibilidade; use
             'share_zero_shot_color_with'.
         share_zero_shot_color_with: Estratégia de cor herdada para séries zero-shot.
             Opções: 'finetuned' (padrão), 'scratch' ou None (não herda).
+    x_limits: Limites do eixo X principal (xmin, xmax). Para log_x=True, a range é em escala log10.
+    main_zero_shift_frac: Fração do span do X principal usada para deslocamento no eixo principal em Plotly. 0.0 desativa.
+    main_zero_shift_mode: 'zero-only' (padrão) desloca apenas pontos x==0 das séries zero-shot e remapeia o tick '0'.
+        'global' desloca todas as marcações (dados/ticks/limites) pela mesma quantidade, preservando os rótulos.
+    inset_domain: Tupla (x0, x1, y0, y1) no espaço [0,1] para posicionar o inset.
+    inset_x_limits: Limites X do inset.
+    inset_y_limits: Limites Y do inset.
+    inset_x_ticks: Lista explícita de ticks para o X do inset.
+    inset_x_integer_ticks: Se True, força ticks inteiros no X do inset.
+    inset_zero_shift_frac: Fração do span de X do inset usada para deslocar pontos com x==0 no inset (apenas zero-shot). Default 0.01.
         legend_loc: Posição da legenda (plotly). Aceita presets como 'top-right', 'top-left', 'bottom-right', 'bottom-left',
             'top-center', 'bottom-center', 'center-right', 'center-left', 'center', 'outside-right'.
             Também aceita tupla (x, y) no intervalo [0,1] para posicionamento customizado.
@@ -597,15 +866,20 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
     )
     if strategy in {'scratch', 'finetuned'}:
         def _is_scratch(name: str) -> bool:
-            return 'scratch' in str(name).lower()
+            s = str(name).lower()
+            return ('scratch' in s) or (('unet' in s) and ('vsunet' not in s))
         def _is_finetuned(name: str) -> bool:
             s = str(name).lower()
-            return ('fine-tuned' in s) or ('finetuned' in s) or ('fine tuned' in s)
+            return (('fine-tuned' in s) or ('finetuned' in s) or ('fine tuned' in s)) or ('vsunet' in s)
         def _is_zero_shot(name: str) -> bool:
             return 'zero-shot' in str(name).lower()
         def _model_id(name: str):
-            m = re.search(r'(resnet\d+)', str(name), flags=re.IGNORECASE)
-            return m.group(1).lower() if m else None
+            s = str(name)
+            for pat in [r'(resnet\d+)', r'(vsunet\d+)', r'\b(unet\d+)\b']:
+                m = re.search(pat, s, flags=re.IGNORECASE)
+                if m:
+                    return m.group(1).lower()
+            return None
         base_color_by_model = {}
         for val in unique_vals:
             if (strategy == 'scratch' and _is_scratch(val)) or (strategy == 'finetuned' and _is_finetuned(val)):
@@ -617,6 +891,17 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
                 mid = _model_id(val)
                 if mid and mid in base_color_by_model:
                     color_map[val] = base_color_by_model[mid]
+
+    # Override de cores: VSUNet18 azul, VSUNet50 laranja (inclui Zero-Shot)
+    try:
+        for val in unique_vals:
+            s = str(val).lower()
+            if 'vsunet18' in s:
+                color_map[val] = 'tab:blue'
+            elif 'vsunet50' in s:
+                color_map[val] = 'tab:orange'
+    except Exception:
+        pass
 
     # Default line styles cycling
     if line_styles is None:
@@ -657,9 +942,30 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
         else:
             size_col = None
 
+    # Preparar eixo X principal com deslocamento opcional (global ou apenas zero-shot)
+    grouped['_x_main'] = grouped[x_data].astype(float)
+    main_zero_offset = None
+    if (main_zero_shift_frac or 0) > 0 and not log_x:
+        try:
+            if x_limits is not None and len(x_limits) == 2:
+                xmin_m, xmax_m = float(x_limits[0]), float(x_limits[1])
+            else:
+                xmin_m, xmax_m = float(grouped[x_data].min()), float(grouped[x_data].max())
+            span_m = max(xmax_m - xmin_m, 1e-9)
+            main_zero_offset = 0.0 + float(main_zero_shift_frac) * span_m
+            mode = (main_zero_shift_mode or 'zero-only').lower()
+            if mode.startswith('global'):
+                grouped['_x_main'] = grouped['_x_main'] + main_zero_offset
+            else:
+                # deslocar apenas as séries zero-shot com x==0
+                mask_zero = grouped[hue].astype(str).str.lower().str.contains('zero-shot')
+                grouped.loc[mask_zero & (grouped['_x_main'] == 0.0), '_x_main'] = main_zero_offset
+        except Exception:
+            main_zero_offset = None
+
     fig = px.line(
         grouped,
-        x=x_data,
+        x='_x_main',
         y=f'mean_{y_data}',
         color=hue,
         line_dash=hue,
@@ -763,6 +1069,23 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
             fig.update_yaxes(range=[ymin, ymax])
         except Exception:
             pass
+    # Limites opcionais do eixo X
+    if x_limits is not None and isinstance(x_limits, (tuple, list)) and len(x_limits) == 2:
+        try:
+            xmin, xmax = float(x_limits[0]), float(x_limits[1])
+            if log_x:
+                import math
+                if xmin > 0 and xmax > 0:
+                    fig.update_xaxes(range=[math.log10(xmin), math.log10(xmax)])
+                else:
+                    print('[WARN] x_limits inválidos para escala log; ignorando limites no log.')
+            else:
+                if (main_zero_offset is not None) and (main_zero_shift_mode or 'zero-only').lower().startswith('global'):
+                    fig.update_xaxes(range=[xmin + main_zero_offset, xmax + main_zero_offset])
+                else:
+                    fig.update_xaxes(range=[xmin, xmax])
+        except Exception:
+            pass
 
     # Tamanhos de fonte
     if font_sizes:
@@ -780,13 +1103,165 @@ def plot_mean_dice_score_px(dataframe: pd.DataFrame, dataset_name: str = 'VessMa
             fig.update_layout(legend_font_size=font_sizes.get('legend'))
 
     # Adjust x ticks if numeric
-    if not log_x and grouped[x_data].dtype.kind in 'iuf':
+    if not log_x and grouped['_x_main'].dtype.kind in 'iuf':
         max_x = grouped[x_data].max()
         step = 2 if max_x >= 8 else 1
-        fig.update_xaxes(dtick=step)
+        if main_zero_offset is None:
+            fig.update_xaxes(dtick=step)
+        elif (main_zero_shift_mode or 'zero-only').lower().startswith('global'):
+            ticks = list(range(0, int(max_x) + 1, step))
+            mapped = [float(t) + main_zero_offset for t in ticks]
+            texts = [str(t) for t in ticks]
+            fig.update_xaxes(tickmode='array', tickvals=mapped, ticktext=texts)
     if log_x:
         if (grouped[x_data] <= 0).any():
             print('[WARN] Non-positive x values present; log scale may be invalid.')
+
+    # Ajustar ticks do eixo X principal para manter rótulo '0' no deslocamento
+    if (main_zero_offset is not None) and not log_x and not ((main_zero_shift_mode or 'zero-only').lower().startswith('global')):
+        try:
+            # montar ticks inteiros padrão e mapear 0 -> offset
+            if x_limits is not None and len(x_limits) == 2:
+                xmin_m, xmax_m = float(x_limits[0]), float(x_limits[1])
+            else:
+                xmin_m, xmax_m = float(grouped[x_data].min()), float(grouped[x_data].max())
+            import math
+            start = max(0, math.ceil(xmin_m))
+            end = math.floor(xmax_m)
+            ticks = list(range(start, end + 1))
+            mapped = [(main_zero_offset if t == 0 else float(t)) for t in ticks]
+            texts = [('0' if t == 0 else str(t)) for t in ticks]
+            fig.update_xaxes(tickmode='array', tickvals=mapped, ticktext=texts)
+        except Exception:
+            pass
+
+    # Inset plot para plotly (eixos x2/y2) se solicitado
+    if inset_domain is not None and go is not None:
+        try:
+            x0, x1, y0, y1 = [float(v) for v in inset_domain]
+            fig.update_layout(
+                xaxis2=dict(domain=[x0, x1], matches=None),
+                yaxis2=dict(domain=[y0, y1], matches=None)
+            )
+            # Limites do inset
+            if inset_y_limits is not None and len(inset_y_limits) == 2:
+                fig.update_layout(yaxis2=dict(range=[float(inset_y_limits[0]), float(inset_y_limits[1])]))
+            if inset_x_limits is not None and len(inset_x_limits) == 2:
+                xmin, xmax = float(inset_x_limits[0]), float(inset_x_limits[1])
+                if log_x:
+                    import math
+                    if xmin > 0 and xmax > 0:
+                        fig.update_layout(xaxis2=dict(range=[math.log10(xmin), math.log10(xmax)]))
+                else:
+                    fig.update_layout(xaxis2=dict(range=[xmin, xmax]))
+            # Calcular deslocamento global para x==0 no inset
+            zero_offset = None
+            try:
+                has_zero_shot = any('zero-shot' in str(v).lower() for v in unique_vals)
+                if has_zero_shot and (not log_x):
+                    if inset_x_limits is not None and len(inset_x_limits) == 2:
+                        xmin_i, xmax_i = float(inset_x_limits[0]), float(inset_x_limits[1])
+                    else:
+                        xmin_i, xmax_i = float(grouped[x_data].min()), float(grouped[x_data].max())
+                    span_i = max(xmax_i - xmin_i, 1e-9)
+                    frac_i = 0.01 if inset_zero_shift_frac is None else float(inset_zero_shift_frac)
+                    zero_offset = 0.0 + frac_i * span_i
+            except Exception:
+                zero_offset = None
+            # Adicionar traces no inset, sem legenda
+            dash_map = {'-': 'solid', '--': 'dash', ':': 'dot', '-.': 'dashdot'}
+            for val in unique_vals:
+                sub = grouped[grouped[hue] == val]
+                dash = line_styles.get(val) if line_styles else None
+                dash = dash_map.get(dash, dash) if dash is not None else None
+                is_zero = 'zero-shot' in str(val).lower()
+                symbol = 'star' if is_zero else 'circle'
+                if symbol_map is not None:
+                    symbol = symbol_map.get(val, symbol)
+                marker_size = None
+                zs_ms = (font_sizes or {}).get('zero_shot_marker') if font_sizes else None
+                if zs_ms is not None and is_zero:
+                    marker_size = zs_ms
+                # Deslocar x==0 levemente para direita no inset (somente zero-shot)
+                xvals = sub[x_data].to_numpy().astype(float).copy()
+                if is_zero and (zero_offset is not None):
+                    try:
+                        xvals[xvals == 0.0] = zero_offset
+                    except Exception:
+                        pass
+                # Texto de anotação no inset quando solicitado
+                mode_val = 'lines+markers' if markers else 'lines'
+                text_vals = None
+                if annotate_zero_shot and is_zero:
+                    mode_val += '+text'
+                    display_val = re.sub(r'(zero-shot)\s*', lambda m: m.group(1) + '<br>', str(val), flags=re.IGNORECASE)
+                    text_vals = [display_val] * len(xvals)
+                fig.add_trace(
+                    go.Scatter(
+                        x=xvals,
+                        y=sub[f'mean_{y_data}'],
+                        mode=mode_val,
+                        name=str(val),
+                        line=dict(color=color_map[val], dash=dash),
+                        marker=dict(symbol=symbol, size=marker_size) if markers else None,
+                        text=text_vals,
+                        textposition='top center' if (annotate_zero_shot and is_zero) else None,
+                        textfont={'size': (font_sizes or {}).get('zero_shot_annotation', 10)} if (annotate_zero_shot and is_zero) else None,
+                        showlegend=False,
+                        xaxis='x2',
+                        yaxis='y2'
+                    )
+                )
+            # Ajustar ticks do x do inset conforme controle solicitado e para que o rótulo "0" acompanhe o deslocamento
+            try:
+                if inset_x_limits is not None and len(inset_x_limits) == 2:
+                    xmin_i, xmax_i = float(inset_x_limits[0]), float(inset_x_limits[1])
+                    span = xmax_i - xmin_i
+                    tickvals = None
+                    if inset_x_ticks is not None:
+                        tickvals = [float(v) for v in inset_x_ticks]
+                    elif inset_x_integer_ticks:
+                        import math
+                        start = math.ceil(min(xmin_i, xmax_i))
+                        end = math.floor(max(xmin_i, xmax_i))
+                        tickvals = list(range(start, end + 1))
+                        # garantir inclusão dos limites se forem inteiros exatos
+                        if abs(xmin_i - round(xmin_i)) < 1e-9 and int(round(xmin_i)) not in tickvals:
+                            tickvals = [int(round(xmin_i))] + tickvals
+                        if abs(xmax_i - round(xmax_i)) < 1e-9 and int(round(xmax_i)) not in tickvals:
+                            tickvals = tickvals + [int(round(xmax_i))]
+                    if tickvals is None and zero_offset is not None and span > 0:
+                        # fallback "agradável" com 4 ticks
+                        step = span / 3.0
+                        tickvals = [xmin_i, xmin_i + step, xmin_i + 2*step, xmax_i]
+                    if tickvals is not None:
+                        # mapear 0 -> zero_offset quando aplicável
+                        mapped = []
+                        texts = []
+                        for v in tickvals:
+                            vv = float(v)
+                            if (zero_offset is not None) and (not log_x) and abs(vv - 0.0) <= max(1e-9, 1e-6*abs(span)):
+                                mapped.append(zero_offset)
+                                texts.append('0')
+                            else:
+                                mapped.append(vv)
+                                # Inteiros sem casas; outros com até 2
+                                texts.append(str(int(round(vv))) if abs(vv - round(vv)) < 1e-9 else f"{vv:.2f}".rstrip('0').rstrip('.'))
+                        fig.update_layout(xaxis2=dict(tickmode='array', tickvals=mapped, ticktext=texts))
+            except Exception:
+                pass
+
+            # Fontes dos ticks do inset
+            try:
+                if font_sizes:
+                    if font_sizes.get('inset_xaxis'):
+                        fig.update_layout(xaxis2=dict(tickfont=dict(size=font_sizes.get('inset_xaxis'))))
+                    if font_sizes.get('inset_yaxis'):
+                        fig.update_layout(yaxis2=dict(tickfont=dict(size=font_sizes.get('inset_yaxis'))))
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[WARN] Falha ao criar inset plot (plotly): {e}")
 
     # Salvar figura interativa como imagem, se solicitado
     if save_path:
