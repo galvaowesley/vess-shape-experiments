@@ -3,7 +3,7 @@ from torchtrainer.train import DefaultTrainer
 import torch.nn as nn
 import torch
 import segmentation_models_pytorch as smp
-from dataset import get_dataset_vessmap_train, get_dataset_drive_train
+from dataset import get_dataset_vessmap_train, get_dataset_drive_train, get_dataset_dca1_train
 
 
 class VesselTrainer(DefaultTrainer):
@@ -14,6 +14,7 @@ class VesselTrainer(DefaultTrainer):
         Args:
             model_class (str): Nome da classe do modelo.
             weights_strategy (str | None): Estratégia para carregar os pesos.
+            encoder_weights (str | None): Pesos do codificador para inicialização.
             num_classes (int): Número de classes de saída.
             num_channels (int): Número de canais de entrada.
             **model_params: Parâmetros adicionais para o modelo.
@@ -25,19 +26,21 @@ class VesselTrainer(DefaultTrainer):
             NotImplementedError: Se o model_class não for reconhecido.
         """
         print(f"Carregando modelo '{model_class}' via VessShapeTrainer.get_model()...")
+        
+        encoder_weights = getattr(self.args, "encoder_weights", None)
 
         
         if model_class == "resnet18_unet":
             model = smp.Unet(
                 encoder_name="resnet18",
-                encoder_weights=None, 
+                encoder_weights=encoder_weights,
                 in_channels=num_channels,
                 classes=num_classes,
             )
         elif model_class == "resnet50_unet":
             model = smp.Unet(
                 encoder_name="resnet50",
-                encoder_weights=None, 
+                encoder_weights=encoder_weights, 
                 in_channels=num_channels,
                 classes=num_classes,
             )
@@ -71,7 +74,12 @@ class VesselTrainer(DefaultTrainer):
         if dataset_class == "drive_few":
             ds_train, ds_valid, class_weights, ignore_index, collate_fn = get_dataset_drive_train(
                 dataset_path, split_strategy, resize_size=resize_size
-            )      
+            )
+        if dataset_class == "dca1_few":
+            ds_train, ds_valid, class_weights, ignore_index, collate_fn = get_dataset_dca1_train(
+                dataset_path, split_strategy, resize_size=resize_size
+        ) 
+                   
        
         return ds_train, ds_valid, class_weights, ignore_index, collate_fn
 

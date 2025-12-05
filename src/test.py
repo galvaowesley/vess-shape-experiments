@@ -51,7 +51,8 @@ def test(param_dict=None):
     dataset_path = args.dataset_path
     resize_size = args.resize_size
     dataset_params = args.dataset_params
-
+    encoder_weights = args.encoder_weights
+    
     if dataset_class == "oxford_pets":
         from torchtrainer.datasets.oxford_pets import get_dataset
 
@@ -64,11 +65,24 @@ def test(param_dict=None):
             dataset_path, "default", resize_size=resize_size, channels='gray', **dataset_params)
         class_weights, ignore_index = dataset_props
     elif dataset_class == "vessmap":
-        from torchtrainer.datasets.vessel import get_dataset_vessmap_train
+        from torchtrainer.datasets.vessel import get_dataset_vessmap_test
 
         # Warning, are relying on the seed to get the same dataset split used during training
-        ds_train, ds_test, *dataset_props = get_dataset_vessmap_train(dataset_path)
+        ds_train, ds_test, *dataset_props = get_dataset_vessmap_test(dataset_path)
         class_weights, ignore_index, _ = dataset_props
+    
+    elif dataset_class in {"dca1", "dca"}:
+        from torchtrainer.datasets.vessel import get_dataset_dca1_test
+
+        # Warning, are relying on the seed to get the same dataset split used during training
+        ds_test, class_weights, *dataset_props = get_dataset_dca1_test(dataset_path, resize_size=resize_size)
+        ignore_index, collate_fn = dataset_props
+        if dataset_class == "dca":
+            print("[WARN] dataset_class 'dca' is deprecated; use 'dca1' for clarity.")
+    else:
+        raise ValueError(
+            f"Unsupported dataset_class='{dataset_class}'. Expected one of: oxford_pets, drive, vessmap, dca1"
+        )
 
     num_classes = len(class_weights)
     num_channels = ds_test[0][0].shape[0]
@@ -94,7 +108,7 @@ def test(param_dict=None):
 
         model = smp.Unet(
             encoder_name="resnet18",
-            encoder_weights=None,  # Pode ser ajustado conforme necessário
+            encoder_weights=encoder_weights,  # imagenet or None
             in_channels=num_channels,
             classes=num_classes,
         )
@@ -102,22 +116,37 @@ def test(param_dict=None):
         
         model = smp.Unet(
             encoder_name="resnet50",
-            encoder_weights=None,  # Pode ser ajustado conforme necessário
+            encoder_weights=encoder_weights,  
             in_channels=num_channels,
             classes=num_classes,
         )
     else:
         raise NotImplementedError(f"Model '{model_class}' not implemented.")
-        
-    # Load the model weights  
-    if args.checkpoint_type == "best":
-        checkpoint = torch.load(run_path/"best_model.pt", weights_only=False)
-    elif args.checkpoint_type == "last":
-        checkpoint = torch.load(run_path/"checkpoint.pt", weights_only=False)
-
-    model.load_state_dict(checkpoint["model"])
+    
+    if not getattr(args, "skip_checkpoint_loading", False):
+        try:
+            if args.checkpoint_type == "best":
+                checkpoint = torch.load(run_path/"best_model.pt", weights_only=False)
+            elif args.checkpoint_type == "last":
+                checkpoint = torch.load(run_path/"checkpoint.pt", weights_only=False)
+            model.load_state_dict(checkpoint["model"])
+        except FileNotFoundError as e:
+            print(f"[WARN]: Could not load checkpoint: {e}. Proceeding with random weights.")
+    else:        
+        print("[INFO]: Skipping checkpoint load. Using encoder_weights or random decoder.")
+    
     model.to(device)
     model.eval()
+     
+    # Load the model weights  
+    # if args.checkpoint_type == "best":
+    #     checkpoint = torch.load(run_path/"best_model.pt", weights_only=False)
+    # elif args.checkpoint_type == "last":
+    #     checkpoint = torch.load(run_path/"checkpoint.pt", weights_only=False)
+# 
+    # model.load_state_dict(checkpoint["model"])
+    # model.to(device)
+    # model.eval()
 
     # Test-time augmentation transforms
     transforms = (
@@ -326,6 +355,14 @@ def get_parser() -> argparse.ArgumentParser:
                              "E.g. --model_params par1=v1 par2=v2 par3=v3")
     parser.add_argument("--checkpoint_type", default="best", choices=["best", "last"],
                     help="Type of checkpoint to load. Options are 'best' and 'last'.")
+    parser.add_argument(
+        "--encoder_weights",
+        default=None,
+        choices=[None, "imagenet"],
+        help="Pretrained weights for the encoder backbone (use 'imagenet' for ImageNet pretraining or None for random initialization)."
+    )
+    parser.add_argument("--skip_checkpoint_loading", action="store_true",
+                        help="If set, skips loading model weights from checkpoint and uses random weights or encoder weights if specified.")
 
     parser.add_argument("--seed", type=int, default=0, metavar="N",
                         help="Seed for the random number generator")
