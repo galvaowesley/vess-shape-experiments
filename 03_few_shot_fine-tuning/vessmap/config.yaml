@@ -1,7 +1,8 @@
 # Section of training parameters
 train_params:
-  experiment_name: multi_finetune_on_vessmap_resnet50_A
-  weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
+  experiment_name: multi_finetune_on_vessmap_unet50_imagenet_weights_lr_e-3
+  # weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
+  encoder_weights: imagenet
   run_name: ''
   validate_every: 5
   save_val_imgs: ''
@@ -23,7 +24,7 @@ train_params:
   optimizer: adam
   num_workers: 12
   log_wandb: ''
-  wandb_project: multi_finetune_on_vessmap_resnet50_A
+  wandb_project: multi_finetune_on_vessmap_unet50_imagenet_weights_lr_e-3
   wandb_group: ''  
   #suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
@@ -39,7 +40,7 @@ experiment_params:
   output_dir: experiments
   step: 2
   csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP/train.csv
-  weights_id: A
+  weights_id: imagenet
 
 # Section of parameters for test/inference
 test_params:
@@ -55,7 +56,8 @@ test_params:
   delete_checkpoint: True
   batch_inference: True
   enable_inference: True
-  force_headless: True # Use headless backend for matplotlib in inference subprocess
-  skip_boxplot: True # Skip boxplot generation in test script
-  max_inference_retries: 1 # Number of retry attempts for failed inference runs
-  delete_only_on_success: True # Only delete checkpoint if inference succeeded
+  force_headless: True  # Use headless backend for matplotlib in inference subprocess
+  skip_boxplot: True    # Skip boxplot generation in test script
+  max_inference_retries: 1  # Number of retry attempts for failed inference runs
+  delete_only_on_success: True  # Only delete checkpoint if inference succeeded
+  aggregate_inference_means: True  # Append mean metrics to aggregated CSV

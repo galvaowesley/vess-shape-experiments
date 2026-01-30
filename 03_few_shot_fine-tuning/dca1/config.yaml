@@ -1,8 +1,9 @@
 # Section of training parameters
 train_params:
-  experiment_name: multi_finetune_on_dca1_unet18_vessshape_weights_lr_e-2
-  weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet18_ts:50k_bs-train:192_ep:1000_lr:0.01_lr-decay:0.0_wd:0.0_opt:adam_class1:0.10_FP16/checkpoint.pt
-  # encoder_weights: imagenet
+  experiment_name: multi_finetune_on_dca1_unet18_imagenet_weights_lr_e-2
+  # weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet18_ts:50k_bs-train:192_ep:1000_lr:0.01_lr-decay:0.0_wd:0.0_opt:adam_class1:0.10_FP16/checkpoint.pt
+  # weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
+  encoder_weights: imagenet
   run_name: ''
   validate_every: 5
   save_val_imgs: ''
@@ -24,7 +25,7 @@ train_params:
   optimizer: adam
   num_workers: 12
   log_wandb: ''
-  wandb_project: multi_finetune_on_dca1_unet18_vessshape_weights_lr_e-2
+  wandb_project: multi_finetune_on_dca1_unet18_imagenet_weights_lr_e-2
   wandb_group: ''  
   #suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
@@ -40,7 +41,7 @@ experiment_params:
   output_dir: experiments
   step: 2
   csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DCA1/train.csv
-  weights_id: vessshape
+  weights_id: imagenet
 
 # Section of parameters for test/inference
 test_params:

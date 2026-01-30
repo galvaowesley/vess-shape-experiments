@@ -1,34 +1,29 @@
 # Section of training parameters
 train_params:
-  # experiment_name: multi_finetune_on_drive_resnet18_A
-  experiment_name: multi_finetune_on_drive_resnet18_imagenet_weights_A
+  experiment_name: multi_train_scratch_dca1_unet50_lr_e-3
   run_name: ''
-  #weights_strategy: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16/checkpoint.pt
-  encoder_weights: imagenet
   validate_every: 5
   save_val_imgs: ''
   val_img_indices: '0 1 2'
-  dataset_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DRIVE
-  dataset_class: drive_few
+  dataset_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DCA1
+  dataset_class: dca1_few
   split_strategy: ''
-  resize_size: '512 512'
-  # model_class: resnet18_unet
-  model_class: resnet18_unet
+  resize_size: '288 288'
+  model_class: resnet50_unet
   num_epochs: 300
   validation_metric: Dice
   maximize_validation_metric: ''
   bs_train: 8
   bs_valid: 20
   weight_decay: 0.0
-  lr: 0.01
+  lr: 0.001
   lr_decay: 1.0
-  ignore_class_weights: '' # Ignore class weights during training
+  # ignore_class_weights: '' # Ignore class weights during training
   optimizer: adam
   num_workers: 12
   log_wandb: ''
-  # wandb_project: multi_finetune_on_drive_resnet18_A
-  wandb_project: multi_finetune_on_drive_resnet18_imagenet_weights_A
-  wandb_group: ''
+  wandb_project: multi_train_scratch_dca1_unet50_lr_e-3
+  wandb_group: ''  
   #suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
   checkpoint_every: -1 # Save checkpoints every last epoch
@@ -36,27 +31,24 @@ train_params:
 # Section of parameters for experiments in series
 experiment_params:
   min_samples: 1
-  max_samples: 16
+  max_samples: 20
   runs: 5
   reps: 3
   with_replacement: False
   output_dir: experiments
   step: 2
-  csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DRIVE/train.csv
-  weights_id: A
-  # (inference orchestration flags moved to test_params)
+  csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DCA1/train.csv
+  weights_id: FromScratch
 
 # Section of parameters for test/inference
 test_params:
   run_path: ""
-  dataset_path: "/media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DRIVE"
-  dataset_class: drive
-  #model_class: resnet18_unet
-  model_class: resnet18_unet
+  dataset_path: "/media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DCA1"
+  dataset_class: dca1
+  model_class: resnet50_unet
   use_amp: ""
   save_inference_images: ""
   checkpoint_type: "last"
-
   inference_dir_name: "inference_results"
   # Inference orchestration controls (moved from experiment_params)
   delete_checkpoint: True
@@ -67,4 +59,3 @@ test_params:
   max_inference_retries: 1  # Number of retry attempts for failed inference runs
   delete_only_on_success: True  # Only delete checkpoint if inference succeeded
   aggregate_inference_means: True  # Append mean metrics to aggregated CSV
-  
