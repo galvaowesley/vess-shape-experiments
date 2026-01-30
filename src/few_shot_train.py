@@ -107,6 +107,28 @@ def run_experiments(
     aggregated_metrics_path = os.path.join(report_dir, 'inference_metrics_mean.csv')
     # Armazena metadados para enriquecer métricas agregadas
     run_metadata = {}
+    # Caminho centralizado para logs de falha de inferência
+    inference_failure_log = os.path.join(report_dir, 'inference_failures.log')
+
+    def log_inference_failure(run_name, attempt_num, message, command, stdout_text='', stderr_text=''):
+        """Append a rich log entry when an inference attempt fails."""
+        os.makedirs(os.path.dirname(inference_failure_log), exist_ok=True)
+        def _tail(text, limit=40):
+            lines = (text or '').splitlines()
+            return '\n'.join(lines[-limit:]) if lines else ''
+
+        with open(inference_failure_log, 'a', encoding='utf-8') as flog:
+            flog.write(f"run_name={run_name} | attempt={attempt_num} | cmd={command}\n")
+            flog.write(f"message={message}\n")
+            std_tail = _tail(stdout_text)
+            err_tail = _tail(stderr_text)
+            if std_tail:
+                flog.write("--- stdout tail ---\n")
+                flog.write(std_tail + "\n")
+            if err_tail:
+                flog.write("--- stderr tail ---\n")
+                flog.write(err_tail + "\n")
+            flog.write("==============================\n")
 
     def append_inference_status(rows):
         """Append status rows; inject dataset_class column automatically."""
@@ -165,26 +187,31 @@ def run_experiments(
             if skip_boxplot:
                 test_params_local['skip_boxplot'] = ''
             # Remove flags que não pertencem ao parser de test.py (evita erro de argparse)
+            # Inclui chaves novas suportadas pelo test.py atual
             allowed_keys = {
                 'run_path','dataset_path','dataset_class','resize_size','dataset_params',
                 'save_inference_images','inference_dir_name','model_class','model_params',
                 'checkpoint_type','seed','device','use_amp','deterministic','benchmark',
-                'tta_type','threshold','force_headless','skip_boxplot'
+                'tta_type','threshold','force_headless','skip_boxplot',
+                'encoder_weights','skip_checkpoint_loading','imagenet_normalize'
             }
             test_params_local = {k:v for k,v in test_params_local.items() if k in allowed_keys}
             positional_args = ["dataset_path", "dataset_class", "model_class"]
             command_args = ["python", test_py_path] + dict_to_argv(test_params_local, positional_args)
-            print(f"[INFO]       Inference attempt {attempt_num} for {run_name}: {' '.join(command_args)}")
+            command_str = ' '.join(command_args)
+            print(f"[INFO]       Inference attempt {attempt_num} for {run_name}: {command_str}")
             # Run subprocess capturing return code
             proc = subprocess.run(command_args, capture_output=True, text=True)
             if proc.returncode != 0:
-                msg = f"returncode={proc.returncode}; stderr_head={(proc.stderr or '').splitlines()[:3]}"
+                msg = f"returncode={proc.returncode}"
                 append_inference_status([[run_name, num_samples, attempt_num, 'failed', checkpoint_type, str(__import__('datetime').datetime.now()), msg]])
+                log_inference_failure(run_name, attempt_num, msg, command_str, proc.stdout, proc.stderr)
                 continue
             # Validate artifacts
             valid, vmsg = validate_inference_artifacts(run_path)
             if not valid:
                 append_inference_status([[run_name, num_samples, attempt_num, 'failed', checkpoint_type, str(__import__('datetime').datetime.now()), vmsg]])
+                log_inference_failure(run_name, attempt_num, vmsg, command_str)
                 continue
             append_inference_status([[run_name, num_samples, attempt_num, 'success', checkpoint_type, str(__import__('datetime').datetime.now()), '']])
             success = True
@@ -233,6 +260,7 @@ def run_experiments(
                         print(f"[WARN]       Failed to aggregate metrics for {run_name}: {e}")
         if not success:
             print(f"[WARN]    Inference failed after {attempts} attempt(s) for {run_name}")
+            log_inference_failure(run_name, attempts, "All attempts failed", command_str if 'command_str' in locals() else 'n/a')
         return success
 
     while num_samples <= max_samples:

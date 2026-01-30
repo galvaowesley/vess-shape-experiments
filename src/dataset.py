@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 
 import torch
-from torchtrainer.datasets.vessel_base import VessMAP, DRIVE, DCA1
+from torchtrainer.datasets.vessel_base import VessMAP, DRIVE, DCA1, OCTA2D
 from torchtrainer.util.train_util import Subset
 from torchvision import tv_tensors
 from torchvision.transforms import v2 as tv_transf
@@ -204,7 +204,6 @@ def get_dataset_dca1_train(
         Size to resize the images
     """
 
-    # class_weights = (0.26, 0.74)
     class_weights = (0.95, 0.05)
     ignore_index = None
     collate_fn = None
@@ -228,8 +227,59 @@ def get_dataset_dca1_train(
         else:
             valid_images.append(image.name)   
 
-    ds_train = DCA1(dataset_path, keepdim=True, files=train_images)
-    ds_valid = DCA1(dataset_path, keepdim=True, files=valid_images)
+    ds_train = DCA1(dataset_path, keepdim=True, files=train_images, channels="gray")
+    ds_valid = DCA1(dataset_path, keepdim=True, files=valid_images, channels="gray")
+        
+    ds_train.transforms = TrainTransforms(resize_size)
+    ds_valid.transforms = ValidTransforms(resize_size)
+
+    return ds_train, ds_valid, class_weights, ignore_index, collate_fn
+
+def get_dataset_octa2d_train(
+        dataset_path, 
+        split_strategy, 
+        resize_size=(384, 384), 
+        ):
+    """Get the OCTA2D dataset for training.
+
+    Parameters
+    ----------
+    dataset_path
+        Path to the dataset root folder
+    split_strategy
+        Strategy to split the dataset. Possible values are:
+        "rand_<split>": Use <split> fraction of the images to validate
+        "file": Use the train.csv and val.csv files to split the dataset
+    resize_size
+        Size to resize the images
+    """
+
+
+    class_weights = (0.085, 0.915)
+    ignore_index = None
+    collate_fn = None
+
+    dataset_path = Path(dataset_path)
+
+    names_train = split_strategy.split(",")
+
+    ds = OCTA2D(dataset_path, keepdim=True)
+
+    train_images = []
+    valid_images = []
+    for image in ds.images:
+        found = False
+        for name in names_train:
+            if name==image.stem:
+                found = True
+            
+        if found:
+            train_images.append(image.name)
+        else:
+            valid_images.append(image.name)   
+
+    ds_train = OCTA2D(dataset_path, keepdim=True, files=train_images, channels="gray")
+    ds_valid = OCTA2D(dataset_path, keepdim=True, files=valid_images, channels="gray")
         
     ds_train.transforms = TrainTransforms(resize_size)
     ds_valid.transforms = ValidTransforms(resize_size)

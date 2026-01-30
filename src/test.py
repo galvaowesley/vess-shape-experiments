@@ -58,12 +58,14 @@ def test(param_dict=None):
 
         _, ds_test, *dataset_props = get_dataset(dataset_path, 0.2, resize_size)
         class_weights, ignore_index, _ = dataset_props
+
     elif dataset_class == "drive":
         from torchtrainer.datasets.vessel import get_dataset_drive_test
 
         ds_train, ds_test, *dataset_props = get_dataset_drive_test(
             dataset_path, "default", resize_size=resize_size, channels='gray', **dataset_params)
         class_weights, ignore_index = dataset_props
+
     elif dataset_class == "vessmap":
         from torchtrainer.datasets.vessel import get_dataset_vessmap_test
 
@@ -75,14 +77,46 @@ def test(param_dict=None):
         from torchtrainer.datasets.vessel import get_dataset_dca1_test
 
         # Warning, are relying on the seed to get the same dataset split used during training
-        ds_test, class_weights, *dataset_props = get_dataset_dca1_test(dataset_path, resize_size=resize_size)
+        ds_test, class_weights, *dataset_props = get_dataset_dca1_test(
+            dataset_path, 
+            resize_size=resize_size, 
+            channels="gray",
+        )
         ignore_index, collate_fn = dataset_props
         if dataset_class == "dca":
             print("[WARN] dataset_class 'dca' is deprecated; use 'dca1' for clarity.")
+
+    elif dataset_class in {"octa2d", "octa"}:
+        from torchtrainer.datasets.vessel import get_dataset_octa2d_test
+
+        # Warning, are relying on the seed to get the same dataset split used during training
+        ds_test, class_weights, *dataset_props = get_dataset_octa2d_test(
+            dataset_path, 
+            resize_size=resize_size, 
+            channels="gray"
+        )
+        ignore_index, collate_fn = dataset_props
+        if dataset_class == "octa":
+            print("[WARN] dataset_class 'octa' is deprecated; use 'octa2d' for clarity.")
+
     else:
         raise ValueError(
-            f"Unsupported dataset_class='{dataset_class}'. Expected one of: oxford_pets, drive, vessmap, dca1"
+            f"Unsupported dataset_class='{dataset_class}'. Expected one of: oxford_pets, drive, vessmap, dca1, octa2d"
         )
+
+    if class_weights is None:
+        # Some dataset helpers may not return class_weights; infer number of classes from a sample.
+        inferred_num_classes = 2
+        try:
+            sample_target = ds_test[0][1]
+            if isinstance(sample_target, torch.Tensor):
+                inferred_num_classes = int(sample_target.max().item()) + 1
+                if inferred_num_classes <= 0:
+                    inferred_num_classes = 2
+        except Exception:
+            inferred_num_classes = 2
+
+        class_weights = tuple([1.0] * inferred_num_classes)
 
     num_classes = len(class_weights)
     num_channels = ds_test[0][0].shape[0]
@@ -164,6 +198,8 @@ def test(param_dict=None):
 
     threshold = args.threshold
     if threshold == -1:
+        if "ds_train" not in locals() or ds_train is None:
+            raise ValueError("threshold=-1 requer ds_train, mas o dataset de teste não forneceu conjunto de treino.")
         threshold = test_util.find_optimal_threshold(
             model, ds_train, ignore_index=ignore_index, device=device)
 
