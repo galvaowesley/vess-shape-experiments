@@ -1,0 +1,21 @@
+benchmark: false
+checkpoint_type: last
+dataset_class: vessmap
+dataset_params: {}
+dataset_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP
+deterministic: false
+device: cuda:0
+force_headless: false
+inference_dir_name: inference_results_vessmap
+model_class: resnet18_unet
+model_params: {}
+resize_size:
+- 384
+- 384
+run_path: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet18_ts:50k_bs-train:192_ep:1000_lr:0.01_lr-decay:0.0_wd:0.0_opt:adam_class1:0.10_FP16
+save_inference_images: true
+seed: 0
+skip_boxplot: false
+threshold: 0.5
+tta_type: none
+use_amp: true
