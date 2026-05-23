@@ -1,5 +1,6 @@
 from pathlib import Path
 from torchtrainer.train import DefaultTrainer
+from torchtrainer.models.litemedsam.litemedsam import get_model as get_litemedsam_model
 import torch.nn as nn
 import torch
 import segmentation_models_pytorch as smp
@@ -7,25 +8,39 @@ from dataset import get_dataset_vessmap_train, get_dataset_drive_train, get_data
 
 
 class VesselTrainer(DefaultTrainer):
-    def get_model(self, model_class, weights_strategy, num_classes, num_channels, **model_params):
+    """
+    Specialized trainer for blood vessel segmentation tasks, using the DefaultTrainer structure from the torchtrainer library.
+    """
+    def get_model(
+        self,
+        model_class,
+        weights_strategy,
+        num_classes,
+        num_channels,
+        freeze_image_encoder=False,
+        img_size=(256, 256),
+        **model_params
+    ):
         """
-        Recebe parâmetros do modelo e retorna a instância do modelo.
+        Receives model parameters and returns the model instance.
 
         Args:
-            model_class (str): Nome da classe do modelo.
-            weights_strategy (str | None): Estratégia para carregar os pesos.
-            encoder_weights (str | None): Pesos do codificador para inicialização.
-            num_classes (int): Número de classes de saída.
-            num_channels (int): Número de canais de entrada.
-            **model_params: Parâmetros adicionais para o modelo.
+            model_class (str): Name of the model class.
+            weights_strategy (str | None): Strategy for loading weights.
+            encoder_weights (str | None): Encoder weights for initialization.
+            num_classes (int): Number of output classes.
+            num_channels (int): Number of input channels.
+            freeze_image_encoder (bool): If True, freezes the encoder weights (only for SAM models).
+            img_size (tuple): Input image size.
+            **model_params: Additional model parameters.
 
         Returns:
-            torch.nn.Module: Instância do modelo.
+            torch.nn.Module: Model instance.
 
         Raises:
-            NotImplementedError: Se o model_class não for reconhecido.
+            NotImplementedError: If the model_class is not recognized.
         """
-        print(f"Carregando modelo '{model_class}' via VessShapeTrainer.get_model()...")
+        print(f"Loading model '{model_class}' via VessShapeTrainer.get_model()...")
         
         encoder_weights = getattr(self.args, "encoder_weights", None)
 
@@ -44,6 +59,9 @@ class VesselTrainer(DefaultTrainer):
                 in_channels=num_channels,
                 classes=num_classes,
             )
+        elif model_class == "litemedsam":
+            img_size = getattr(self.args, "resize_size", img_size)
+            model = get_litemedsam_model(img_size=img_size, freeze_image_encoder=freeze_image_encoder)
         else:
             raise NotImplementedError(f"Model '{model_class}' not implemented.")
 
@@ -56,7 +74,8 @@ class VesselTrainer(DefaultTrainer):
                 print(f"Loading weights from {weights_path}...")
                 checkpoint = torch.load(weights_path, map_location=self.args.device, weights_only=False)
                  # Check if the checkpoint contains 'model' key
-                state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
+                raw_state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
+                state_dict = {k: v.clone() for k, v in raw_state_dict.items()}
                 model.load_state_dict(state_dict)
                 print("Weights loaded successfully.")
             else:
@@ -67,21 +86,26 @@ class VesselTrainer(DefaultTrainer):
     
     def get_dataset(self, dataset_class, dataset_path, split_strategy, resize_size, 
                     augmentation_strategy, **dataset_params):
-        
+        channels = getattr(self.args, "channels", "all")
+        loss_function = getattr(self.args, "loss_function", "cross_entropy")
+        squeeze_target = (loss_function == "cross_entropy")
+
         if dataset_class == "vessmap_few":
-            ds_train, ds_valid, *dataset_props = get_dataset_vessmap_train(dataset_path, split_strategy)
+            ds_train, ds_valid, *dataset_props = get_dataset_vessmap_train(
+                dataset_path, channels=channels, split_strategy=split_strategy, resize_size=resize_size, squeeze_target=squeeze_target
+            )
             class_weights, ignore_index, collate_fn = dataset_props  
         if dataset_class == "drive_few":
             ds_train, ds_valid, class_weights, ignore_index, collate_fn = get_dataset_drive_train(
-                dataset_path, split_strategy, resize_size=resize_size
+                dataset_path, split_strategy, resize_size=resize_size, squeeze_target=squeeze_target
             )
         if dataset_class == "dca1_few":
             ds_train, ds_valid, class_weights, ignore_index, collate_fn = get_dataset_dca1_train(
-                dataset_path, split_strategy, resize_size=resize_size
+                dataset_path, split_strategy, resize_size=resize_size, squeeze_target=squeeze_target
         ) 
         if dataset_class == "octa2d_few":
             ds_train, ds_valid, class_weights, ignore_index, collate_fn = get_dataset_octa2d_train(
-                dataset_path, split_strategy, resize_size=resize_size
+                dataset_path, split_strategy, resize_size=resize_size, squeeze_target=squeeze_target
         ) 
                    
        

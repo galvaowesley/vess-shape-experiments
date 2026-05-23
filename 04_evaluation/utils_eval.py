@@ -64,6 +64,32 @@ ZERO_SHOT_LABEL = {
     'resnet50_unet': 'Zero-Shot VSUNet50',
 }
 
+# Registry of zero-shot variants produced by run_zero_shot_inference.ipynb.
+# `variant_key` is also the raw output subdir under ZERO_SHOT_RAW_DIR:
+#   zero_shot_inferences/<variant_key>/inference_results_<dataset>/{metrics,metrics_stats}.csv
+# Because resnet{18,50}_unet now has two weight origins (vessshape vs imagenet), the
+# model_class alone no longer identifies the label — `model_type` is authored explicitly.
+ZERO_SHOT_VARIANTS = {
+    'resnet18_vessshape': {'model_class': 'resnet18_unet', 'weights': 'vessshape',  'model_type': 'Zero-Shot VSUNet18'},
+    'resnet50_vessshape': {'model_class': 'resnet50_unet', 'weights': 'vessshape',  'model_type': 'Zero-Shot VSUNet50'},
+    'resnet18_imagenet':  {'model_class': 'resnet18_unet', 'weights': 'imagenet',   'model_type': 'Zero-Shot IN-UNet18'},
+    'resnet50_imagenet':  {'model_class': 'resnet50_unet', 'weights': 'imagenet',   'model_type': 'Zero-Shot IN-UNet50'},
+    'litemedsam':         {'model_class': 'litemedsam',    'weights': 'litemedsam', 'model_type': 'Zero-Shot LiteMedSAM'},
+    'litemedsam_normalized': {
+        'model_class': 'litemedsam',
+        'weights': 'litemedsam',          # pesos: lite_medsam.pth — NÃO encoder_weights='imagenet'
+        'model_type': 'Zero-Shot LiteMedSAM+IN',
+        'imagenet_normalize': True,       # só pré-processamento de entrada (_PreprocessModel)
+    },
+}
+
+# Legacy raw dirs (pre-phase-3) held the vessshape resnet zero-shot under these names.
+# Used as a fallback so existing outputs keep working until regenerated.
+_LEGACY_RAW_DIR_FOR_VARIANT = {
+    'resnet18_vessshape': 'resnet18',
+    'resnet50_vessshape': 'resnet50',
+}
+
 _RUN_TOKEN_RE = re.compile(r'run:(\d+)_rep:(\d+)_ns:(\d+)')
 
 
@@ -241,7 +267,13 @@ def _find_zero_shot_csv(dataset: str, zero_shot_dir: str) -> str | None:
 
 
 def _load_real_zero_shot(dataset: str, zero_shot_dir: str) -> pd.DataFrame | None:
-    """Load the real zero-shot CSV for a dataset. Returns None if absent."""
+    """Load the real zero-shot CSV for a dataset. Returns None if absent.
+
+    Trusts an explicit `model_type` column when present (the consolidated CSV authored by
+    `build_zero_shot_csv` carries the correct label per variant, since `model_class` alone
+    no longer disambiguates vessshape vs imagenet). Falls back to the `ZERO_SHOT_LABEL`
+    map only for rows whose `model_type` is missing/empty.
+    """
     csv_path = _find_zero_shot_csv(dataset, zero_shot_dir)
     if csv_path is None:
         return None
@@ -249,18 +281,89 @@ def _load_real_zero_shot(dataset: str, zero_shot_dir: str) -> pd.DataFrame | Non
     df = df.copy()
     if 'num_samples' not in df.columns:
         df['num_samples'] = 0
-    df['model_type'] = df['model_class'].map(ZERO_SHOT_LABEL).fillna(
-        df.get('model_type', pd.Series([None] * len(df)))
-    )
+    mapped = df['model_class'].map(ZERO_SHOT_LABEL)
+    if 'model_type' in df.columns:
+        existing = df['model_type']
+        df['model_type'] = existing.where(existing.notna() & (existing.astype(str) != ''), mapped)
+    else:
+        df['model_type'] = mapped
     df['stage'] = 'zero_shot'
     df['experiment'] = '__zero_shot_csv__'
     df['is_mock'] = False
-    if 'run' not in df.columns:
-        df['run'] = None
-    if 'rep' not in df.columns:
-        df['rep'] = None
-    if 'wandb_group' not in df.columns:
-        df['wandb_group'] = None
+    for col in ('run', 'rep', 'wandb_group'):
+        if col not in df.columns:
+            df[col] = None
+    return df
+
+
+def _variant_raw_dir(variant_key: str, dataset: str, raw_dir: str) -> str | None:
+    """Return the existing raw inference dir for a zero-shot variant/dataset, or None.
+
+    Tries the phase-3 layout `<raw_dir>/<variant_key>/inference_results_<ds>` first, then
+    the legacy vessshape resnet dirs (`resnet18`/`resnet50`).
+    """
+    candidate = os.path.join(raw_dir, variant_key, f'inference_results_{dataset}')
+    if os.path.isdir(candidate):
+        return candidate
+    legacy = _LEGACY_RAW_DIR_FOR_VARIANT.get(variant_key)
+    if legacy:
+        alt = os.path.join(raw_dir, legacy, f'inference_results_{dataset}')
+        if os.path.isdir(alt):
+            return alt
+    return None
+
+
+def build_zero_shot_csv(dataset: str,
+                        raw_dir: str = ZERO_SHOT_RAW_DIR,
+                        out_dir: str = ZERO_SHOT_DIR,
+                        variants: dict | None = None,
+                        write: bool = True) -> pd.DataFrame:
+    """Consolidate raw zero-shot inferences into the per-dataset CSV the eval pipeline reads.
+
+    For each variant in `variants` (default `ZERO_SHOT_VARIANTS`), reads the `mean` row of
+    `<raw_dir>/<variant_key>/inference_results_<dataset>/metrics_stats.csv` (with legacy
+    fallback) and emits one row. Writes
+    `<out_dir>/zero_shot_inference_results_on_<dataset>.csv` and returns the DataFrame.
+
+    Columns: [run_name, num_samples=0, wandb_group, model_class, weights, *METRICS, model_type].
+    """
+    variants = variants if variants is not None else ZERO_SHOT_VARIANTS
+    cols = ['run_name', 'num_samples', 'wandb_group', 'model_class', 'weights'] + METRICS + ['model_type']
+    rows = []
+    for variant_key, meta in variants.items():
+        run_dir = _variant_raw_dir(variant_key, dataset, raw_dir)
+        if run_dir is None:
+            continue
+        stats_path = os.path.join(run_dir, 'metrics_stats.csv')
+        if not os.path.exists(stats_path):
+            continue
+        try:
+            df_stats = pd.read_csv(stats_path)
+        except Exception:
+            continue
+        if 'statistic' not in df_stats.columns:
+            continue
+        mean_row = df_stats[df_stats['statistic'] == 'mean']
+        if mean_row.empty:
+            continue
+        mean_row = mean_row.iloc[0]
+        row = {
+            'run_name': f'zero_shot_{variant_key}',
+            'num_samples': 0,
+            'wandb_group': meta['weights'],
+            'model_class': meta['model_class'],
+            'weights': meta['weights'],
+            'model_type': meta['model_type'],
+        }
+        for m in METRICS:
+            row[m] = float(mean_row[m]) if m in mean_row.index and pd.notna(mean_row[m]) else np.nan
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=cols)
+    if write and not df.empty:
+        ensure_output_dirs()
+        out_path = os.path.join(out_dir, f'zero_shot_inference_results_on_{dataset}.csv')
+        df.to_csv(out_path, index=False)
     return df
 
 
@@ -394,15 +497,19 @@ def _aggregate_experiment_per_image(experiment_path: str) -> pd.DataFrame:
 
 
 def _load_real_zero_shot_per_image(dataset: str,
-                                   raw_dir: str = ZERO_SHOT_RAW_DIR) -> pd.DataFrame | None:
-    """Read raw per-image zero-shot metrics from
-    `<raw_dir>/resnet{18,50}/inference_results_<dataset>/metrics.csv`.
-    Returns None if nothing is found.
+                                   raw_dir: str = ZERO_SHOT_RAW_DIR,
+                                   variants: dict | None = None) -> pd.DataFrame | None:
+    """Read raw per-image zero-shot metrics for every available variant from
+    `<raw_dir>/<variant_key>/inference_results_<dataset>/metrics.csv` (legacy
+    `resnet18`/`resnet50` dirs are tried as fallback). Returns None if nothing is found.
     """
+    variants = variants if variants is not None else ZERO_SHOT_VARIANTS
     frames = []
-    for arch_dir, model_class in _RESNET_DIR_TO_MC.items():
-        metrics_path = os.path.join(raw_dir, arch_dir,
-                                    f'inference_results_{dataset}', 'metrics.csv')
+    for variant_key, meta in variants.items():
+        run_dir = _variant_raw_dir(variant_key, dataset, raw_dir)
+        if run_dir is None:
+            continue
+        metrics_path = os.path.join(run_dir, 'metrics.csv')
         if not os.path.exists(metrics_path):
             continue
         try:
@@ -412,13 +519,14 @@ def _load_real_zero_shot_per_image(dataset: str,
         if df.empty:
             continue
         df = df.assign(
-            run_name=f'zero_shot_{arch_dir}',
+            run_name=f'zero_shot_{variant_key}',
             num_samples=0,
             run=None,
             rep=None,
-            wandb_group=None,
-            model_class=model_class,
-            model_type=ZERO_SHOT_LABEL.get(model_class, f'Zero-Shot {model_class}'),
+            wandb_group=meta['weights'],
+            model_class=meta['model_class'],
+            weights=meta['weights'],
+            model_type=meta['model_type'],
             stage='zero_shot',
             experiment='__zero_shot_raw__',
             is_mock=False,
@@ -550,6 +658,10 @@ def default_line_styles_7way() -> dict:
         'LiteMedSAM-FT':       ':',
         'Zero-Shot VSUNet18':  '--',
         'Zero-Shot VSUNet50':  '--',
+        'Zero-Shot IN-UNet18': '-.',
+        'Zero-Shot IN-UNet50': '-.',
+        'Zero-Shot LiteMedSAM': ':',
+        'Zero-Shot LiteMedSAM+IN': '--',
         'Zero-Shot VSUNet18 (mock)': '--',
         'Zero-Shot VSUNet50 (mock)': '--',
     }

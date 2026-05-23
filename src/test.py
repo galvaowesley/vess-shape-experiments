@@ -18,9 +18,75 @@ from tqdm.auto import tqdm
 from torchtrainer.metrics.confusion_metrics import ConfusionMatrixMetrics, ROCAUCScore
 from torchtrainer.util import test_util
 from torchtrainer.util.train_util import ParseKwargs, WrapDict, dict_to_argv, seed_all
+from torchtrainer.models.litemedsam.litemedsam import get_model as get_litemedsam_model
+
 
 import segmentation_models_pytorch as smp
 
+
+# --- Optional preprocessing: ImageNet normalization ------------------------------------------
+class _PreprocessModel(torch.nn.Module):
+    """Wraps a model to apply ImageNet normalization inside forward when enabled.
+
+    This ensures any external utilities (e.g., threshold search, TTA) see the same
+    normalized inputs without modifying dataset pipelines. Ported from test___.py so the
+    `--imagenet_normalize` flag is available in the standard test path. Default is disabled,
+    so wrapping with enable=False is a no-op passthrough.
+    """
+
+    def __init__(self, base_model: torch.nn.Module, num_channels: int, enable: bool = True):
+        super().__init__()
+        self.base = base_model
+        self.enable = enable
+        self.num_channels = num_channels
+        # Register buffers so they follow .to(device) automatically
+        self.register_buffer("_mean3", torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32))
+        self.register_buffer("_std3", torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32))
+
+    def _normalize_imagenet(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalize a BCHW or CHW tensor using ImageNet stats.
+
+        - Casts to float32 if needed
+        - Scales to [0,1] if values look like [0,255] or dtype is integer
+        - Handles 1 or 3 channels. For other channel counts, broadcasts scalar using first entry.
+        """
+        if not torch.is_floating_point(x):
+            x = x.float()
+
+        needs_div255 = not torch.is_floating_point(x)
+        if not needs_div255:
+            try:
+                needs_div255 = bool((x.amax() > 1.0).item())
+            except Exception:
+                needs_div255 = False
+        if needs_div255:
+            x = x / 255.0
+
+        if x.dim() == 3:
+            C = x.shape[0]
+            if C == 3:
+                mean = self._mean3.view(3, 1, 1)
+                std = self._std3.view(3, 1, 1)
+            else:
+                mean = self._mean3[:1].view(1, 1, 1)
+                std = self._std3[:1].view(1, 1, 1)
+        elif x.dim() == 4:
+            C = x.shape[1]
+            if C == 3:
+                mean = self._mean3.view(1, 3, 1, 1)
+                std = self._std3.view(1, 3, 1, 1)
+            else:
+                mean = self._mean3[:1].view(1, 1, 1, 1)
+                std = self._std3[:1].view(1, 1, 1, 1)
+        else:
+            return x
+
+        return (x - mean) / std
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.enable:
+            x = self._normalize_imagenet(x)
+        return self.base(x)
 
 
 @torch.no_grad()
@@ -52,7 +118,10 @@ def test(param_dict=None):
     resize_size = args.resize_size
     dataset_params = args.dataset_params
     encoder_weights = args.encoder_weights
-    
+    # Optional input channels override. Default None preserves each dataset's prior default
+    # ('gray' for drive/dca1/octa2d, 'all' for vessmap). Set to 'rgb' for LiteMedSAM.
+    channels = getattr(args, "channels", None)
+
     if dataset_class == "oxford_pets":
         from torchtrainer.datasets.oxford_pets import get_dataset
 
@@ -63,14 +132,16 @@ def test(param_dict=None):
         from torchtrainer.datasets.vessel import get_dataset_drive_test
 
         ds_train, ds_test, *dataset_props = get_dataset_drive_test(
-            dataset_path, "default", resize_size=resize_size, channels='gray', **dataset_params)
+            dataset_path, "default", resize_size=resize_size,
+            channels=(channels or 'gray'), **dataset_params)
         class_weights, ignore_index = dataset_props
 
     elif dataset_class == "vessmap":
         from torchtrainer.datasets.vessel import get_dataset_vessmap_test
 
         # Warning, are relying on the seed to get the same dataset split used during training
-        ds_train, ds_test, *dataset_props = get_dataset_vessmap_test(dataset_path)
+        ds_train, ds_test, *dataset_props = get_dataset_vessmap_test(
+            dataset_path, channels=(channels or 'all'), resize_size=resize_size)
         class_weights, ignore_index, _ = dataset_props
     
     elif dataset_class in {"dca1", "dca"}:
@@ -78,9 +149,9 @@ def test(param_dict=None):
 
         # Warning, are relying on the seed to get the same dataset split used during training
         ds_test, class_weights, *dataset_props = get_dataset_dca1_test(
-            dataset_path, 
-            resize_size=resize_size, 
-            channels="gray",
+            dataset_path,
+            resize_size=resize_size,
+            channels=(channels or "gray"),
         )
         ignore_index, collate_fn = dataset_props
         if dataset_class == "dca":
@@ -91,9 +162,9 @@ def test(param_dict=None):
 
         # Warning, are relying on the seed to get the same dataset split used during training
         ds_test, class_weights, *dataset_props = get_dataset_octa2d_test(
-            dataset_path, 
-            resize_size=resize_size, 
-            channels="gray"
+            dataset_path,
+            resize_size=resize_size,
+            channels=(channels or "gray"),
         )
         ignore_index, collate_fn = dataset_props
         if dataset_class == "octa":
@@ -154,6 +225,9 @@ def test(param_dict=None):
             in_channels=num_channels,
             classes=num_classes,
         )
+    elif model_class == "litemedsam":
+            freeze_image_encoder = model_params.get("freeze_image_encoder", False)
+            model = get_litemedsam_model(img_size=resize_size, freeze_image_encoder=freeze_image_encoder)
     else:
         raise NotImplementedError(f"Model '{model_class}' not implemented.")
     
@@ -163,12 +237,19 @@ def test(param_dict=None):
                 checkpoint = torch.load(run_path/"best_model.pt", weights_only=False)
             elif args.checkpoint_type == "last":
                 checkpoint = torch.load(run_path/"checkpoint.pt", weights_only=False)
-            model.load_state_dict(checkpoint["model"])
+            state_dict = {k: v.clone() for k, v in checkpoint["model"].items()}
+            model.load_state_dict(state_dict)
         except FileNotFoundError as e:
             print(f"[WARN]: Could not load checkpoint: {e}. Proceeding with random weights.")
-    else:        
+    else:
         print("[INFO]: Skipping checkpoint load. Using encoder_weights or random decoder.")
-    
+
+    # Optional ImageNet normalization wrapper (default off). Useful to evaluate the
+    # ImageNet-encoder zero-shot variant with the encoder's expected input statistics.
+    if getattr(args, "imagenet_normalize", False):
+        model = _PreprocessModel(model, num_channels=num_channels, enable=True)
+        print("[INFO]: ImageNet normalization enabled (inputs normalized inside forward).")
+
     model.to(device)
     model.eval()
      
@@ -373,6 +454,10 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("dataset_class", help="Name of the dataset class to use")
     parser.add_argument("--resize_size", default=(384, 384), nargs=2, type=int, metavar=("N", "N"),
                         help="Size to resize the images. E.g. --resize_size 128 128")
+    parser.add_argument("--channels", default=None, choices=["gray", "rgb", "all", "green"],
+                        help="Input channels to load from the dataset. Default None preserves "
+                             "each dataset's prior behavior ('gray' for drive/dca1/octa2d, 'all' "
+                             "for vessmap). Use 'rgb' for 3-channel models such as LiteMedSAM.")
     parser.add_argument("--dataset_params", nargs="*", default={}, action=ParseKwargs,
                         metavar="par1=v1 par2=v2 par3=v3",
                         help="Additional parameters to pass to the dataset creation function. "
@@ -399,6 +484,9 @@ def get_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--skip_checkpoint_loading", action="store_true",
                         help="If set, skips loading model weights from checkpoint and uses random weights or encoder weights if specified.")
+    parser.add_argument("--imagenet_normalize", action="store_true",
+                        help="If set, normalizes inputs with ImageNet mean/std inside the model "
+                             "forward (useful for the ImageNet-encoder zero-shot variant). Default off.")
 
     parser.add_argument("--seed", type=int, default=0, metavar="N",
                         help="Seed for the random number generator")

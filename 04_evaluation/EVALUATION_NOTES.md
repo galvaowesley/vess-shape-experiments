@@ -19,10 +19,14 @@ variantes para **7 variantes de modelo** + zero-shot.
 
 | Dataset  | nº max de samples (ns) | Zero-shot real? | Scratch disponível? |
 |----------|------------------------|-----------------|---------------------|
-| VessMap  | 20                     | ✅ Sim (CSV)    | ✅ Sim              |
-| DRIVE    | 16                     | ✅ Sim (CSV)    | ❌ **Ausente** (inferência ainda não rodou para `multi_train_scratch_drive_*`) |
-| DCA1     | 20                     | ❌ **Mock**     | ✅ Sim              |
-| OCTA2D   | 20                     | ❌ **Mock**     | ✅ Sim (1 run sem `metrics_stats.csv`) |
+| VessMap  | 20                     | ✅ Sim (6 variantes) | ✅ Sim          |
+| DRIVE    | 16                     | ✅ Sim (6 variantes) | ❌ **Ausente** (inferência ainda não rodou para `multi_train_scratch_drive_*`) |
+| DCA1     | 20                     | ✅ Sim (6 variantes) | ✅ Sim          |
+| OCTA2D   | 20                     | ✅ Sim (6 variantes) | ✅ Sim (1 run sem `metrics_stats.csv`) |
+
+> **Zero-shot (fase 3+4):** os 4 datasets têm zero-shot real gerado por `run_zero_shot_inference.ipynb`
+> em 6 variantes — VSUNet18/50 (VessShape), IN-UNet18/50 (ImageNet), LiteMedSAM e LiteMedSAM+IN.
+> O mock foi aposentado (fica só como fallback se um CSV faltar).
 
 ## 3. Layout dos dados (origem)
 
@@ -50,16 +54,20 @@ Dois estágios de experimentos, cada um com subpasta por dataset:
 | `IN-UNet18` / `IN-UNet50` | U-Net ResNet-18/50 | **ImageNet**      | Fine-tuning         | `finetune` |
 | `LiteMedSAM-FT`      | LiteMedSAM        | **MedSAM**            | Fine-tuning         | `finetune` |
 | `Zero-Shot VSUNet18` / `...50` | U-Net ResNet-18/50 | **VessShape** | **Sem** fine-tuning | `zero_shot`|
+| `Zero-Shot IN-UNet18` / `...50` | U-Net ResNet-18/50 | **ImageNet** | **Sem** fine-tuning | `zero_shot`|
+| `Zero-Shot LiteMedSAM` | LiteMedSAM     | **MedSAM**            | **Sem** fine-tuning | `zero_shot`|
+| `Zero-Shot LiteMedSAM+IN` | LiteMedSAM  | **MedSAM** + norm. IN entrada | **Sem** fine-tuning | `zero_shot`|
 | `... (mock)`         | —                 | —                     | Placeholder `NaN`   | `zero_shot`|
 
-Convenções: `VS`=VessShape, `IN-`=ImageNet, `-FT`=fine-tuned, `Zero-Shot`=sem FT (ns=0),
-` (mock)`=placeholder com `is_mock=True`.
+Convenções: `VS`=VessShape, `IN-`=ImageNet, `-FT`=fine-tuned, `+IN`=normalização ImageNet na entrada
+(`_PreprocessModel`, não altera pesos), `Zero-Shot`=sem FT (ns=0), `(mock)`=placeholder com `is_mock=True`.
 
 ## 5. Decisões fechadas
 
 - **Estrutura**: 1 notebook mestre + 4 por-dataset, todos reusando `utils_eval.py`.
 - **DRIVE scratch ausente** → pular silenciosamente (séries não aparecem; sanity cell avisa).
-- **Zero-shot DCA1/OCTA2D** → mockado (NaN) até a inferência real existir.
+- **Zero-shot** → real para os 4 datasets (5 variantes), gerado por `run_zero_shot_inference.ipynb`.
+  Mock (`mock_zero_shot=True`) só como fallback se um CSV faltar.
 - **Dirs ignorados** (em `DEFAULT_IGNORE_DIRS`):
   - `multi_finetune_on_drive_resnet50_A`
   - `multi_finetune_on_drive_unet50_imagenet_weights`
@@ -78,8 +86,10 @@ Convenções: `VS`=VessShape, `IN-`=ImageNet, `-FT`=fine-tuned, `Zero-Shot`=sem 
 | `eval_dca1.ipynb`                | Avaliação DCA1 (zero-shot mock) |
 | `eval_octa2d.ipynb`              | Avaliação OCTA2D (zero-shot mock) |
 | `eval_master_cross_dataset.ipynb`| Comparações cross-dataset + tabelas/figuras agregadas |
+| `run_zero_shot_inference.ipynb`  | **Gera** o zero-shot real (5 variantes × 4 datasets) e consolida os CSVs |
 
-Arquivos legados (intocados): `utils.py`, `models_evalation.ipynb`, `inference_zero_shot.ipynb`.
+Arquivos legados (intocados): `utils.py`, `models_evalation.ipynb`, `inference_zero_shot.ipynb`
+(este último substituído por `run_zero_shot_inference.ipynb`).
 
 ## 6.1. Estrutura de pastas (a partir de 2026-05-22, fase 2)
 
@@ -107,12 +117,28 @@ Três matrizes intermediárias por granularidade, escritas por `utils_eval.save_
 
 Granularidades:
 - **Média por run** (sufixo vazio): uma linha por run = model_type × ns × run × rep.
-- **Por imagem** (sufixo `_per_image`): uma linha por imagem de teste (de `inference_results/metrics.csv`). Zero-shot real entra (lido do raw); zero-shot mock **não** tem per-image, então `<ds>_zero_shot_results_per_image.csv` fica vazio para dca1/octa2d até a inferência real.
+- **Por imagem** (sufixo `_per_image`): uma linha por imagem de teste (de `inference_results/metrics.csv`). Zero-shot real entra (lido do raw por variante).
 
-### Zero-shot para TODOS os datasets (auto-discovery)
-- `load_dataset_results` / `load_dataset_per_image` procuram `zero_shot/zero_shot_inference_results_on_<ds>.csv` (fallback `zero_shot_inferences/`). Existindo o CSV real, ele é usado e o mock é ignorado — **sem editar código**.
-- Para habilitar dca1/octa2d: dropar o CSV em `zero_shot/` (mesma convenção de nome) e re-rodar o notebook. Per-image zero-shot virá de `zero_shot_inferences/resnet{18,50}/inference_results_<ds>/metrics.csv`.
-- `mock_zero_shot=True` só preenche enquanto o CSV real não existe (fallback gracioso, `is_mock=True`).
+### Zero-shot — 6 variantes para TODOS os datasets (fase 3+4)
+
+Geradas por `run_zero_shot_inference.ipynb`. Layout raw (1 pasta por variante):
+```
+zero_shot_inferences/<variant_key>/inference_results_<ds>/{metrics.csv, metrics_stats.csv}
+```
+`variant_key ∈ {resnet18_vessshape, resnet50_vessshape, resnet18_imagenet, resnet50_imagenet, litemedsam, litemedsam_normalized}`
+(dirs legados `resnet18`/`resnet50` = VessShape, ainda aceitos como fallback). Registry em
+`utils_eval.ZERO_SHOT_VARIANTS` mapeia cada `variant_key → {model_class, weights, model_type[, imagenet_normalize]}`.
+
+- **Consolidação:** `utils_eval.build_zero_shot_csv(ds)` lê a linha `mean` de cada variante e escreve
+  `zero_shot/zero_shot_inference_results_on_<ds>.csv` com colunas
+  `[run_name, num_samples=0, wandb_group, model_class, weights, *METRICS, model_type]` (1 linha/variante).
+- **Auto-discovery:** `load_dataset_results` lê esse CSV e **confia no `model_type`** dele (model_class
+  sozinho já não distingue VessShape × ImageNet). `load_dataset_per_image` itera as pastas por variante.
+  Existindo o CSV/raw real, o mock é ignorado — sem editar código.
+- **resize por dataset (ResNet):** vessmap 256 · drive 288 · dca1 288 · octa2d 384; **LiteMedSAM = 256** sempre.
+  Canais: ResNet usa o default do dataset (gray/all); LiteMedSAM usa `rgb` (3 canais, exigência do encoder).
+- **Normalização ImageNet:** opcional (`IMAGENET_NORMALIZE` no notebook → `--imagenet_normalize` no `test.py`), default off.
+- `mock_zero_shot=True` só preenche se um CSV real faltar (fallback gracioso, `is_mock=True`).
 
 ## 7. API do `utils_eval.py`
 
@@ -120,11 +146,15 @@ Granularidades:
   → DataFrame tidy: `[run_name, num_samples, run, rep, wandb_group, model_class, Accuracy, IoU, Precision, Recall, Dice, AUC, model_type, stage, experiment, is_mock]`.
 - `load_all_datasets(datasets=DATASETS, **kwargs)` → `dict[str, DataFrame]`.
 - `build_summary_table(df, metrics=METRICS, group_cols=('model_type','num_samples'), sample_filter=None)` → mean/std (reusa `utils.get_experiments_grouped_stats`).
+- `build_zero_shot_csv(dataset, raw_dir=ZERO_SHOT_RAW_DIR, out_dir=ZERO_SHOT_DIR, variants=ZERO_SHOT_VARIANTS, write=True)`
+  → consolida as 6 variantes (linha `mean` de cada `metrics_stats.csv`) em `zero_shot/zero_shot_inference_results_on_<ds>.csv`.
+- `save_result_matrices(df, dataset, out_dir=RESULTS_DIR, suffix='')` → escreve few/zero/all matrices.
 - `generate_mock_zero_shot(dataset, model_classes=('resnet18_unet','resnet50_unet'), placeholder=nan)`.
-- `default_line_styles_7way()` → dict de line styles explícito (evita ciclo de 4 patterns).
+- `default_line_styles_7way()` → dict de line styles explícito (cobre VSUNet/IN-UNet/LiteMedSAM zero-shot).
 - `report_coverage(df)` → contagem/min/max de `num_samples` por `(model_type, stage)`.
 
-Constantes: `DATASETS`, `STAGES`, `DEFAULT_IGNORE_DIRS`, `METRICS`, `DEFAULT_LABEL_MAP`, `ZERO_SHOT_LABEL`.
+Constantes: `DATASETS`, `STAGES`, `DEFAULT_IGNORE_DIRS`, `METRICS`, `DEFAULT_LABEL_MAP`, `ZERO_SHOT_LABEL`,
+`ZERO_SHOT_VARIANTS` (registry variant_key → {model_class, weights, model_type}).
 
 ## 8. Como rodar
 
@@ -136,19 +166,28 @@ jupyter nbconvert --to notebook --execute eval_vessmap.ipynb --output eval_vessm
 # repetir para drive, dca1, octa2d, eval_master_cross_dataset
 ```
 
-## 9. Checks de sanidade esperados (último smoke-test em 2026-05-22)
+## 9. Checks de sanidade esperados (zero-shot real — fase 3+4, 2026-05-22)
 
-| Dataset  | shape   | model_types (nº de runs) |
-|----------|---------|--------------------------|
-| vessmap  | 1104×16 | 7 variantes (135–165 cada) + 2 zero-shot reais |
-| drive    | 677×16  | 5 finetune (135 cada) + 2 zero-shot reais; **sem scratch** |
-| dca1     | 999×16  | 7 variantes + 2 zero-shot mock |
-| octa2d   | 1155×16 | 7 variantes + 2 zero-shot mock |
+Cada `zero_shot/zero_shot_inference_results_on_<ds>.csv` deve ter **6 linhas** (VSUNet18/50,
+IN-UNet18/50, LiteMedSAM, LiteMedSAM+IN) e `load_dataset_results(<ds>)` deve mostrar `is_mock=False`.
+Dice zero-shot observado (referência — fase 3):
+
+| Dataset  | VSUNet18 | VSUNet50 | IN-UNet18 | IN-UNet50 | LiteMedSAM | LiteMedSAM+IN |
+|----------|----------|----------|-----------|-----------|------------|---------------|
+| vessmap  | 0.766    | 0.638    | 0.103     | 0.366     | ~0.00      | (a rodar)     |
+| drive    | 0.553    | 0.175    | 0.172     | 0.226     | ~0.00      | (a rodar)     |
+| dca1     | 0.536    | 0.480    | 0.055     | 0.092     | ~0.00      | (a rodar)     |
+| octa2d   | 0.272    | 0.470    | 0.138     | 0.151     | ~0.00      | (a rodar)     |
+
+> **LiteMedSAM zero-shot ≈ 0 (H1)**: sem normalização ImageNet na entrada, o encoder TinyViT
+> recebe inputs fora de distribuição → embeddings degradados → Dice ≈ 0. `LiteMedSAM+IN` valida
+> esta hipótese: se Dice > 0, H1 é confirmada. O prompt (caixa da imagem inteira) é o mesmo em
+> ambas as variantes e não é a causa primária (o `prompt_encoder` é congelado em treino e teste).
 
 ## 10. Pendências / TODO
 
-- [ ] Rodar inferência **zero-shot real** para DCA1 e OCTA2D e substituir os mocks
-      (gerar `zero_shot_inference_results_on_{dca1,octa2d}.csv` em `zero_shot_inferences/`).
+- [ ] Rodar `litemedsam_normalized` (fase 4) nos 4 datasets e re-executar `eval_*.ipynb`;
+      confirmar que LiteMedSAM+IN Dice > 0 (valida H1) ou documentar como limitação.
 - [ ] Rodar inferência **from-scratch** do DRIVE (`multi_train_scratch_drive_*`) para
       preencher `UNet18`/`UNet50` no DRIVE.
 - [ ] (Opcional) Coordenar cores das novas variantes `IN-UNet*` e `LiteMedSAM-FT` no
@@ -163,9 +202,34 @@ jupyter nbconvert --to notebook --execute eval_vessmap.ipynb --output eval_vessm
 - `share_zero_shot_color_with` só conhece resnet/unet/vsunet; `IN-UNet*` e `LiteMedSAM-FT` ficam com cor da paleta padrão (suficiente para o paper inicial).
 - OCTA2D finetune: 1 run sem `metrics_stats.csv` (164/165) — skip silencioso é aceitável.
 - DRIVE scratch ainda vazio — sanity cell sinaliza; re-rodar a avaliação quando a inferência from-scratch for feita.
+- **LiteMedSAM (torchtrainer)** usa encoders singletons a nível de módulo: `test()` in-process move-os
+  p/ GPU e a 2a chamada quebra com device-mismatch. Por isso `run_zero_shot_inference.ipynb` roda
+  cada inferência como **subprocesso** de `src/test.py` (igual ao orquestrador few-shot).
+- **Caminho do projeto tem espaços** (Google Drive). `dict_to_argv` dá `.split()` nos valores, então
+  a saída é escrita por um **symlink sem espaços** (`/tmp/vss_zero_shot_raw`) que aponta p/ `zero_shot_inferences/`.
+- LiteMedSAM zero-shot Dice ≈ 0 (H1: encoder TinyViT sem normalização ImageNet recebe inputs
+  fora de dist.). `litemedsam_normalized` (+IN) valida a hipótese — se Dice > 0, normalização era necessária.
+  H2 (full-image bbox) descartada como causa primária: `prompt_encoder` é congelado, logo o prompt
+  embedding é idêntico em zero-shot e few-shot; a diferença vem do encoder/decoder adaptados.
 
 ## 11. Histórico de mudanças
 
+- **2026-05-22 (fase 4 — investigação LiteMedSAM zero-shot)** — Adicionada 6ª variante
+  `litemedsam_normalized` (`Zero-Shot LiteMedSAM+IN`): mesmos pesos `lite_medsam.pth` com
+  normalização ImageNet na entrada (`_PreprocessModel`). Hipóteses: H1 (normalização, dominante)
+  e H2 (full-image bbox, descartada — `prompt_encoder` é congelado em ambos os regimes).
+  `utils_eval.py`: `litemedsam_normalized` em `ZERO_SHOT_VARIANTS`, estilo `--`, flag
+  `imagenet_normalize` no registry. `run_zero_shot_inference.ipynb`: Patches A+B no helper,
+  nova seção §4, tabela atualizada (6 variantes). `eval_*.ipynb`: legenda + família LiteMedSAM
+  (FT + ZS + ZS+IN). `EVALUATION_NOTES.md`: atualizado (seções 2, 4, 6.1, 7, 9, 10, 10.1, 11).
+- **2026-05-22 (fase 3 — zero-shot real p/ todos os datasets)** — Novo `run_zero_shot_inference.ipynb`
+  gera zero-shot real em **5 variantes × 4 datasets** (VSUNet18/50, IN-UNet18/50, LiteMedSAM), via
+  subprocesso de `src/test.py`. `src/test.py` ganhou `--channels` (default preserva comportamento) e
+  `--imagenet_normalize` (opcional, default off; wrapper `_PreprocessModel` portado de `test___.py`).
+  `utils_eval.py`: `ZERO_SHOT_VARIANTS` + `build_zero_shot_csv`, `_load_real_zero_shot` confia no
+  `model_type` do CSV, `_load_real_zero_shot_per_image` itera as pastas por variante, line styles
+  para os novos labels. Notebooks `eval_*` com legenda atualizada e `MOCK_ZS=False` em dca1/octa2d.
+  20/20 inferências OK; LiteMedSAM zero-shot ≈ 0 (esperado). Legado `inference_zero_shot.ipynb` intocado.
 - **2026-05-22 (fase 2 — reorganização)** — Subdiretórios `results/`, `figures/`, `zero_shot/`,
   `_legacy/`. Sufixo `v2` aposentado (arquivos novos são o padrão). Artefatos legados do
   `models_evalation.ipynb` movidos para `_legacy/` (fontes legados mantidos no topo).

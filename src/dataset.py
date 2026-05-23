@@ -86,6 +86,7 @@ class ValidTransforms:
 def get_dataset_vessmap_train(
         dataset_path, 
         split_strategy, 
+        channels='all',
         resize_size=(512, 512), 
         ):
     """Get the VessMAP dataset for training.
@@ -94,6 +95,8 @@ def get_dataset_vessmap_train(
     ----------
     dataset_path
         Path to the dataset root folder
+    channels
+        Which channels to load. Possible values are "all", "gray", or "rgb"'
     split_strategy
         Strategy to split the dataset. Possible values are:
         "rand_<split>": Use <split> fraction of the images to validate
@@ -125,8 +128,8 @@ def get_dataset_vessmap_train(
         else:
             valid_images.append(image.name)   
 
-    ds_train = VessMAP(dataset_path, keepdim=True, files=train_images)
-    ds_valid = VessMAP(dataset_path, keepdim=True, files=valid_images)
+    ds_train = VessMAP(dataset_path, channels=channels, keepdim=True, files=train_images)
+    ds_valid = VessMAP(dataset_path, channels=channels, keepdim=True, files=valid_images)
         
     ds_train.transforms = TrainTransforms(resize_size)
     ds_valid.transforms = ValidTransforms(resize_size)

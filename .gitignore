@@ -1,4 +1,5 @@
-*experiments/
+**/experiments/
+**/experiments_depreciado/
 inferences/
 __pycache__/
 *.pyc
