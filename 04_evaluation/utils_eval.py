@@ -667,6 +667,375 @@ def default_line_styles_7way() -> dict:
     }
 
 
+def load_model_palette(yaml_path: str | None = None,
+                       warn_missing: Iterable[str] | None = None) -> dict[str, str] | None:
+    """Load standardized model_type -> color palette from a YAML file.
+
+    Returns None if the file does not exist. Passed downstream as
+    `color_map_override` to plot helpers so colors stay consistent across figures.
+
+    yaml_path: defaults to `<module_dir>/model_colors.yaml`.
+    warn_missing: optional iterable of labels expected in the YAML; emits
+        a warning listing any that are absent (does not raise).
+    """
+    if yaml_path is None:
+        yaml_path = os.path.join(_MODULE_DIR, 'model_colors.yaml')
+    if not os.path.exists(yaml_path):
+        return None
+    with open(yaml_path) as f:
+        palette = yaml.safe_load(f) or {}
+    if warn_missing:
+        missing = [lbl for lbl in warn_missing if lbl not in palette]
+        if missing:
+            import warnings
+            warnings.warn(
+                f"load_model_palette: {len(missing)} label(s) absent in {yaml_path}: {missing}",
+                stacklevel=2,
+            )
+    return palette
+
+
+# =============================================================================
+# Cross-dataset bar charts & Wilcoxon significance helpers
+# =============================================================================
+# Moved here from `eval_master_cross_dataset.ipynb` so the master notebook holds
+# only the orchestration loop. All `plot_*` helpers do lazy matplotlib/scipy
+# imports to keep `utils_eval` light on cold load.
+
+ALPHA = 0.05
+DATASETS_ORDER = ['dca1', 'drive', 'octa2d', 'vessmap']
+
+# Pairwise mapping fine-tuned model -> zero-shot counterpart for N=0 column
+# in Wilcoxon heatmaps and the significance markers on bar charts.
+FINE_TUNED_TO_ZEROSHOT = {
+    'VSUNet18':      'Zero-Shot VSUNet18',
+    'VSUNet50':      'Zero-Shot VSUNet50',
+    'IN-UNet18':     'Zero-Shot IN-UNet18',
+    'IN-UNet50':     'Zero-Shot IN-UNet50',
+    'LiteMedSAM-FT': 'Zero-Shot LiteMedSAM',
+}
+
+# VSUNet vs alternative-pretraining comparisons for §8 Wilcoxon heatmaps.
+VSUPAIR_COMPARISONS = [
+    ('VSUNet18', 'IN-UNet18'),
+    ('VSUNet18', 'LiteMedSAM-FT'),
+    ('VSUNet50', 'IN-UNet50'),
+    ('VSUNet50', 'LiteMedSAM-FT'),
+]
+
+
+def load_per_image_dict(datasets: Iterable[str] | None = None,
+                        results_dir: str = RESULTS_DIR) -> dict[str, pd.DataFrame]:
+    """Load `{dataset: DataFrame}` from `results/<ds>_all_results_per_image.csv`.
+
+    Used by the Wilcoxon helpers below. Datasets default to `DATASETS_ORDER`.
+    """
+    if datasets is None:
+        datasets = DATASETS_ORDER
+    return {ds: pd.read_csv(os.path.join(results_dir, f'{ds}_all_results_per_image.csv'))
+            for ds in datasets}
+
+
+def _sig_label(p, alpha: float = ALPHA) -> str | None:
+    """Return `*`, `**`, `***` or None (not significant / nan)."""
+    if p is None or (isinstance(p, float) and math.isnan(p)) or p >= alpha:
+        return None
+    return '***' if p < 0.001 else ('**' if p < 0.01 else '*')
+
+
+def compute_bar_sig_pvalues(pivot: pd.DataFrame,
+                            per_image: dict[str, pd.DataFrame],
+                            n_samples: int = 1,
+                            metric: str = 'Dice',
+                            fine_tuned_to_zeroshot: dict[str, str] | None = None,
+                            min_common_images: int = 5) -> dict[str, dict[str, float]]:
+    """Wilcoxon one-sided p-values: fine-tuned @ n_samples vs zero-shot counterpart.
+
+    Returns dict `{ft_model: {dataset: p_value}}`. NaN entries indicate insufficient
+    paired-image overlap (< `min_common_images`) or missing data.
+    """
+    from scipy import stats
+    if fine_tuned_to_zeroshot is None:
+        fine_tuned_to_zeroshot = FINE_TUNED_TO_ZEROSHOT
+
+    sig_p: dict[str, dict[str, float]] = {}
+    for ft_model, zs_model in fine_tuned_to_zeroshot.items():
+        if ft_model not in pivot.index:
+            continue
+        p_by_ds: dict[str, float] = {}
+        for ds, df_pi in per_image.items():
+            zs_df = df_pi[(df_pi['model_type'] == zs_model) & (~df_pi['is_mock'])]
+            if zs_df.empty:
+                p_by_ds[ds] = float('nan')
+                continue
+            zs_by_img = zs_df.groupby('image')[metric].mean()
+            ft_df = df_pi[
+                (df_pi['model_type'] == ft_model)
+                & (df_pi['num_samples'] == n_samples)
+                & (df_pi['stage'] == 'finetune')
+            ]
+            if ft_df.empty:
+                p_by_ds[ds] = float('nan')
+                continue
+            ft_by_img = ft_df.groupby('image')[metric].mean()
+            common = ft_by_img.index.intersection(zs_by_img.index)
+            if len(common) < min_common_images:
+                p_by_ds[ds] = float('nan')
+                continue
+            ft_v, zs_v = ft_by_img[common].values, zs_by_img[common].values
+            if (ft_v == zs_v).all():
+                p_by_ds[ds] = 1.0
+                continue
+            _, p = stats.wilcoxon(ft_v, zs_v, alternative='greater')
+            p_by_ds[ds] = p
+        sig_p[ft_model] = p_by_ds
+    return sig_p
+
+
+def compute_pairwise_sig_matrix(model_a: str,
+                                model_b: str,
+                                per_image: dict[str, pd.DataFrame],
+                                metric: str = 'Dice',
+                                datasets_order: Iterable[str] | None = None,
+                                fine_tuned_to_zeroshot: dict[str, str] | None = None,
+                                min_common_images: int = 5) -> pd.DataFrame:
+    """Wilcoxon p-values for H: Metric(model_a) > Metric(model_b), per dataset × N.
+
+    N=0 reuses zero-shot variants via `fine_tuned_to_zeroshot`; N>=1 uses fine-tuned runs.
+    Returns DataFrame: rows = datasets (ordered), cols = num_samples.
+    """
+    from scipy import stats
+    if datasets_order is None:
+        datasets_order = DATASETS_ORDER
+    if fine_tuned_to_zeroshot is None:
+        fine_tuned_to_zeroshot = FINE_TUNED_TO_ZEROSHOT
+
+    all_ns = {0}
+    for df_pi in per_image.values():
+        for m in [model_a, model_b]:
+            all_ns.update(
+                df_pi[(df_pi['model_type'] == m) & (df_pi['stage'] == 'finetune')][
+                    'num_samples'
+                ].unique()
+            )
+    ns_ordered = sorted(all_ns)
+
+    rows: dict[str, dict[int, float]] = {}
+    for ds, df_pi in per_image.items():
+        row: dict[int, float] = {}
+        for n in ns_ordered:
+            if n == 0:
+                ma = fine_tuned_to_zeroshot.get(model_a)
+                mb = fine_tuned_to_zeroshot.get(model_b)
+                if ma is None or mb is None:
+                    row[n] = float('nan')
+                    continue
+                df_a = df_pi[(df_pi['model_type'] == ma) & (~df_pi['is_mock'])]
+                df_b = df_pi[(df_pi['model_type'] == mb) & (~df_pi['is_mock'])]
+            else:
+                df_a = df_pi[(df_pi['model_type'] == model_a)
+                             & (df_pi['num_samples'] == n) & (df_pi['stage'] == 'finetune')]
+                df_b = df_pi[(df_pi['model_type'] == model_b)
+                             & (df_pi['num_samples'] == n) & (df_pi['stage'] == 'finetune')]
+            if df_a.empty or df_b.empty:
+                row[n] = float('nan')
+                continue
+            a_img = df_a.groupby('image')[metric].mean()
+            b_img = df_b.groupby('image')[metric].mean()
+            common = a_img.index.intersection(b_img.index)
+            if len(common) < min_common_images:
+                row[n] = float('nan')
+                continue
+            a_v, b_v = a_img[common].values, b_img[common].values
+            if (a_v == b_v).all():
+                row[n] = 1.0
+                continue
+            _, p = stats.wilcoxon(a_v, b_v, alternative='greater')
+            row[n] = p
+        rows[ds] = row
+
+    return pd.DataFrame(rows, index=ns_ordered).T.reindex(list(datasets_order))
+
+
+def plot_crossdataset_bar(pivot: pd.DataFrame,
+                          title: str = '',
+                          ylabel: str = '',
+                          xlabel: str = 'Dataset',
+                          save_path: str | None = None,
+                          y_limits: tuple | None = None,
+                          ymin: float | None = None,
+                          ymax: float | None = None,
+                          sig_pvalues: dict | None = None,
+                          alpha: float = ALPHA,
+                          color_map_override: dict | None = None,
+                          palette=None,
+                          percentage: bool = False,
+                          font_sizes: dict | None = None,
+                          figsize: tuple = (12, 5.5),
+                          rotation: float = 0,
+                          legend_loc: str = 'upper left',
+                          legend_bbox: tuple = (1.01, 1),
+                          legend_title: str = 'Model',
+                          datasets_order: Iterable[str] | None = None,
+                          dpi: int = 150) -> pd.DataFrame:
+    """Grouped bar chart: x-axis = dataset, grouped colors = model_type.
+
+    Parameters
+    ----------
+    pivot : DataFrame
+        index = model_type, columns = dataset.
+    sig_pvalues : dict, optional
+        {model: {dataset: p_value}} — adds *, **, *** above bars.
+    color_map_override : dict, optional
+        {model_type: color}. Wins over `palette`. Pass `load_model_palette()`
+        for cross-figure consistency.
+    palette : sequence, optional
+        Fallback palette when a model_type is missing in `color_map_override`.
+        Defaults to `sns.color_palette("muted")`.
+    percentage : bool
+        Multiplies values by 100 and formats yaxis with `%`. Default False.
+    font_sizes : dict, optional
+        Keys: title, xlabel, ylabel, xaxis, yaxis, legend, sig_marker.
+    y_limits : tuple, optional
+        (ymin, ymax). Has priority over `ymin`/`ymax`.
+    datasets_order : iterable, optional
+        Row order of the resulting bar groups. Defaults to `DATASETS_ORDER`.
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from matplotlib.ticker import PercentFormatter
+
+    fs = font_sizes or {}
+    if datasets_order is None:
+        datasets_order = DATASETS_ORDER
+    if palette is None:
+        palette = sns.color_palette("muted")
+    pivot_T = pivot.T.reindex(list(datasets_order)).dropna(how='all')
+    if percentage:
+        pivot_T = pivot_T * 100.0
+    n_models = len(pivot_T.columns)
+
+    fallback_cycle = (list(palette) * 10)[:n_models]
+    colors = [
+        (color_map_override or {}).get(col, fallback_cycle[i])
+        for i, col in enumerate(pivot_T.columns)
+    ]
+
+    fig, ax = plt.subplots(figsize=figsize)
+    pivot_T.plot(kind='bar', ax=ax, color=colors,
+                 edgecolor='white', linewidth=0.5, width=0.75)
+
+    ax.set_ylabel(ylabel, fontsize=fs.get('ylabel', 11))
+    ax.set_xlabel(xlabel, fontsize=fs.get('xlabel', 11))
+    ax.set_title(title, fontsize=fs.get('title', 12))
+    ax.legend(title=legend_title, bbox_to_anchor=legend_bbox, loc=legend_loc,
+              fontsize=fs.get('legend', 8), title_fontsize=fs.get('legend', 9), framealpha=0.9)
+    ax.grid(True, axis='y', linestyle=':', alpha=0.6, linewidth=0.8)
+    ax.spines[['top', 'right']].set_visible(False)
+    plt.setp(ax.get_xticklabels(), rotation=rotation, ha='center', fontsize=fs.get('xaxis', 10))
+    plt.setp(ax.get_yticklabels(), fontsize=fs.get('yaxis', 10))
+
+    if percentage:
+        ax.yaxis.set_major_formatter(PercentFormatter(decimals=0))
+
+    ylim_auto = ax.get_ylim()
+    offset = (ylim_auto[1] - ylim_auto[0]) * 0.025
+
+    if sig_pvalues is not None:
+        bar_w = 0.75 / n_models
+        for d_idx, dataset in enumerate(pivot_T.index):
+            for m_idx, model in enumerate(pivot_T.columns):
+                p = sig_pvalues.get(model, {}).get(dataset, float('nan'))
+                label = _sig_label(p, alpha)
+                if label is None:
+                    continue
+                bar_x = d_idx + (m_idx - (n_models - 1) / 2) * bar_w
+                bar_h = pivot_T.loc[dataset, model]
+                if pd.isna(bar_h):
+                    continue
+                ax.text(bar_x, bar_h + offset, label,
+                        ha='center', va='bottom',
+                        fontsize=fs.get('sig_marker', 7),
+                        fontweight='bold', color='#333333')
+
+    if y_limits is not None:
+        ax.set_ylim(*y_limits)
+    else:
+        ax.set_ylim(
+            ymin if ymin is not None else ylim_auto[0],
+            ymax if ymax is not None else ylim_auto[1],
+        )
+
+    plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(save_path, bbox_inches='tight', dpi=dpi)
+    plt.show()
+    return pivot_T
+
+
+def plot_sig_heatmap(p_matrix: pd.DataFrame,
+                     title: str = '',
+                     save_path: str | None = None,
+                     alpha: float = ALPHA,
+                     xlabel: str = '# Samples',
+                     ylabel: str = 'Dataset',
+                     font_sizes: dict | None = None,
+                     figsize: tuple | None = None,
+                     dpi: int = 150) -> None:
+    """Publication-quality Wilcoxon significance heatmap.
+
+    - Dark blue = significant (p < alpha).
+    - Light blue = not significant.
+    - Gray + red X = no data (NaN).
+    - No numeric annotations inside cells.
+
+    font_sizes: dict with optional keys `title, xlabel, ylabel, xaxis, yaxis`.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+
+    fs = font_sizes or {}
+    sig = (p_matrix < alpha).astype(float)
+    nan_mask = p_matrix.isna()
+    plot_data = sig.where(~nan_mask, other=-1.0)
+
+    nrows, ncols = plot_data.shape
+    if figsize is None:
+        figsize = (max(5, ncols * 0.55 + 1.5), max(2.5, nrows * 0.65 + 1.2))
+
+    # gray (NaN=-1) | light blue (0=not sig) | dark blue (1=sig)
+    cmap = ListedColormap(['#cccccc', '#d6e4f0', '#1a5276'])
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.imshow(plot_data.values, cmap=cmap, vmin=-1, vmax=1, aspect='auto')
+
+    for i, ds in enumerate(plot_data.index):
+        for j, col in enumerate(plot_data.columns):
+            if nan_mask.loc[ds, col]:
+                ax.plot(j, i, 'x', color='#cc0000', markersize=7, markeredgewidth=2)
+
+    ax.set_xticks(range(ncols))
+    ax.set_yticks(range(nrows))
+    ax.set_xticklabels(plot_data.columns, fontsize=fs.get('xaxis', 9))
+    ax.set_yticklabels(plot_data.index, fontsize=fs.get('yaxis', 9))
+    ax.set_xlabel(xlabel, fontsize=fs.get('xlabel', 12))
+    ax.set_ylabel(ylabel, fontsize=fs.get('ylabel', 12))
+    ax.set_title(title, fontsize=fs.get('title', 12))
+
+    # White cell borders
+    import numpy as np
+    ax.set_xticks(np.arange(ncols) - 0.5, minor=True)
+    ax.set_yticks(np.arange(nrows) - 0.5, minor=True)
+    ax.grid(which='minor', color='white', linewidth=1.5)
+    ax.tick_params(which='minor', bottom=False, left=False)
+    ax.spines[:].set_visible(False)
+
+    plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(save_path, bbox_inches='tight', dpi=dpi)
+    plt.show()
+
+
 def report_coverage(df: pd.DataFrame) -> pd.DataFrame:
     """Quick coverage table: count of rows per (model_type, stage) and
     range of num_samples observed. Useful for the sanity cell.

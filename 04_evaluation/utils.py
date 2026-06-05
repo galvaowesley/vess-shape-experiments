@@ -167,6 +167,7 @@ def get_experiments_grouped_stats(df: pd.DataFrame, group_cols: List[str], metri
 def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_data='num_samples', y_data='Dice',
                          line_styles: dict | None = None, markers: bool = True, log_x: bool = False,
                          marker_map: dict | None = None, annotate_zero_shot: bool = False,
+                         color_map_override: dict | None = None,
                          share_zero_shot_color_with_scratch: bool = True,
                          share_zero_shot_color_with: str | None = 'finetuned',
                          title: str | None = None,
@@ -307,16 +308,13 @@ def plot_mean_dice_score(dataframe, dataset_name='VessMap', hue='model_type', x_
                 if mid and mid in base_color_by_model:
                     color_map[val] = base_color_by_model[mid]
 
-    # Override de cores: VSUNet18 azul, VSUNet50 laranja (inclui Zero-Shot)
-    try:
+    # Override final via paleta padronizada (model_colors.yaml carregado em
+    # utils_eval.load_model_palette). Tem prioridade sobre share_zero_shot_color_with
+    # e sobre a paleta default; mantem consistencia de cor cross-figure.
+    if color_map_override:
         for val in unique_vals:
-            s = str(val).lower()
-            if 'vsunet18' in s:
-                color_map[val] = 'tab:blue'
-            elif 'vsunet50' in s:
-                color_map[val] = 'tab:orange'
-    except Exception:
-        pass
+            if val in color_map_override:
+                color_map[val] = color_map_override[val]
 
     # Aggregate: mean and std per (hue, x)
     grouped = df.groupby([hue, x_data])[y_data].agg(['mean', 'std']).reset_index()
