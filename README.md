@@ -65,20 +65,21 @@ If you plan to use notebooks and plots interactively, also install Jupyter/Plotl
 │   └── vessmap-from-scratch/
 │       ├── run_training.py
 │       └── train.py
-├── 02_few_shot_training_from_scratch/
-│   ├── drive/
-│   │   ├── config.yaml                # train / experiment / test sections
-│   │   └── run_serial_fine-tuning.py  # Orchestrates multiple few-shot runs
-│   └── vessmap/
-│       ├── config.yaml
-│       ├── run_serial_fine-tuning.py
-│       └── experiments/               # Auto-generated outputs
-├── 03_few_shot_fine-tuning/
-│   ├── drive/
-│   └── vessmap/
-│       ├── config.yaml
-│       ├── run_serial_fine-tuning.py
-│       └── experiments/
+├── 02_few_shot_training_from_scratch/   # Train from scratch (random init)
+│   ├── run_serial_training.py           # Single launcher: --dataset <ds> --config_file <cfg>
+│   ├── dca1/  drive/  octa2d/  vessmap/  # One folder per target dataset, each with:
+│   │   ├── config_unet18.yaml            #   ResNet18-U-Net, from scratch
+│   │   ├── config_unet50.yaml            #   ResNet50-U-Net, from scratch
+│   │   └── experiments/                  #   Auto-generated outputs
+├── 03_few_shot_fine-tuning/             # Fine-tune from pre-trained weights
+│   ├── run_serial_fine-tuning.py        # Single launcher: --dataset <ds> --config_file <cfg>
+│   ├── dca1/  drive/  octa2d/  vessmap/  # One folder per target dataset, each with:
+│   │   ├── config_unet18_imagenet.yaml   #   ResNet18-U-Net, ImageNet init
+│   │   ├── config_unet18_vessshape.yaml  #   ResNet18-U-Net, VessShape-pretrained init
+│   │   ├── config_unet50_imagenet.yaml   #   ResNet50-U-Net, ImageNet init
+│   │   ├── config_unet50_vessshape.yaml  #   ResNet50-U-Net, VessShape-pretrained init
+│   │   ├── config_litemedsam.yaml        #   LiteMedSAM fine-tuning
+│   │   └── experiments/                  #   Auto-generated outputs
 ├── 04_evaluation/
 │   ├── models_evalation.ipynb         # Aggregation/plots (Dice vs. samples, etc.)
 │   └── utils.py                       # Plotting/helpers
@@ -111,24 +112,122 @@ python 01_pretraining_on_vessshape/multi-validation/run_training.py
 python 01_pretraining_on_vessshape/vessmap-from-scratch/run_training.py
 ```
 
+Each stage has a **single launcher** at its root that takes `--dataset` (which target dataset
+folder to run) and `--config_file` (which config inside that folder). Config files follow the
+scheme `config_<model>_<init>.yaml`, where `<model> ∈ {unet18, unet50, litemedsam}` and, for
+fine-tuning, `<init> ∈ {imagenet, vessshape}` (stage 02 trains from scratch, so it has no `<init>`).
+
 1) Few-shot training from scratch
 
 ```bash
-python 02_few_shot_training_from_scratch/vessmap/run_serial_fine-tuning.py
-python 02_few_shot_training_from_scratch/drive/run_serial_fine-tuning.py
+cd 02_few_shot_training_from_scratch
+python run_serial_training.py --dataset drive --config_file config_unet18.yaml
+python run_serial_training.py --dataset drive --config_file config_unet50.yaml
+# swap --dataset for dca1 / octa2d / vessmap
 ```
 
 1) Few-shot fine-tuning (starting from pre-trained weights)
 
 ```bash
-python 03_few_shot_fine-tuning/vessmap/run_serial_fine-tuning.py
-python 03_few_shot_fine-tuning/drive/run_serial_fine-tuning.py
+cd 03_few_shot_fine-tuning
+python run_serial_fine-tuning.py --dataset drive --config_file config_unet18_imagenet.yaml
+python run_serial_fine-tuning.py --dataset drive --config_file config_unet18_vessshape.yaml
+python run_serial_fine-tuning.py --dataset drive --config_file config_unet50_imagenet.yaml
+python run_serial_fine-tuning.py --dataset drive --config_file config_unet50_vessshape.yaml
+python run_serial_fine-tuning.py --dataset drive --config_file config_litemedsam.yaml
+# swap --dataset for dca1 / octa2d / vessmap
 ```
 
 1) Evaluation & plots
 
 - Open `04_evaluation/models_evalation.ipynb` to aggregate results and draw figures.
 - Reusable helpers in `04_evaluation/utils.py` (matplotlib/plotly curves, zero-shot annotations, etc.).
+
+## Config files: parameters (stages 02 & 03)
+
+Every config is a single YAML with three sections: `train_params`, `experiment_params`, `test_params`.
+
+**Value convention.** Parameters are forwarded to the training/inference scripts as command-line
+flags (`--key value`). A value of `''` (empty string) means a **boolean flag that is ON** (e.g.
+`ignore_class_weights: ''`); to turn it **OFF**, comment out or remove the line. List-valued
+parameters are space-separated strings (`resize_size: '512 512'` → two integers).
+
+### `train_params`
+
+| Parameter | Example / values | Description |
+|---|---|---|
+| `experiment_name` | `multi_finetune_on_drive_unet18_imagenet_weights_lr_e-2_ignore_class_weights` | Names the output folder under `experiments/` and the W&B project. |
+| `weights_strategy` | path to `checkpoint.pt` | Pre-trained (VessShape) checkpoint to initialize from. Omit/comment for no checkpoint. |
+| `encoder_weights` | `imagenet` \| omit | Encoder backbone weights (U-Net). Omit for random init. |
+| `run_name` | `''` | Set automatically by the launcher (leave empty). |
+| `validate_every` | `5` | Validate every N epochs. |
+| `save_val_imgs` | flag | Save validation images. |
+| `val_img_indices` | `'0 1 2'` | Indices of validation images to save. |
+| `dataset_path` | `/.../DRIVE` | Dataset root directory. |
+| `dataset_class` | `drive_few` | Training dataset class (`*_few` = few-shot subset sampler). |
+| `split_strategy` | `''` | Set automatically (selected sample IDs). |
+| `channels` | `gray\|rgb\|all\|green` | Input channels; used by LiteMedSAM (`rgb`) and VessMAP (`all`). Omit for the per-dataset default. |
+| `resize_size` | `'512 512'` | Resize `H W` (drive 512, octa2d 384, dca1 288, vessmap 256; litemedsam 256). |
+| `loss_function` | `bce` | Loss; LiteMedSAM uses `bce`, U-Nets default to `cross_entropy`. |
+| `model_class` | `resnet18_unet\|resnet50_unet\|litemedsam` | Model architecture. |
+| `model_params` | `freeze_encoder=False` | Extra model kwargs (LiteMedSAM). |
+| `num_epochs` | `500` | Training epochs. |
+| `validation_metric` | `Dice` | Metric tracked for validation. |
+| `maximize_validation_metric` | flag | Treat the metric as "higher is better". |
+| `bs_train` / `bs_valid` | `8` / `20` | Train / validation batch sizes. |
+| `weight_decay` | `0.0` | Optimizer weight decay. |
+| `lr` | `1e-2` (unet18) / `1e-3` (unet50) | Learning rate (varies per model). |
+| `lr_decay` | `1.0` | LR decay factor. |
+| `ignore_class_weights` | flag | Ignore class weights (ON for dca1/drive/octa2d, OFF for vessmap). |
+| `optimizer` | `adam` | Optimizer. |
+| `num_workers` | `12` | DataLoader workers. |
+| `log_wandb` | flag | Log to Weights & Biases. |
+| `wandb_project` | = `experiment_name` | W&B project name. |
+| `wandb_group` | `''` | Set automatically by the launcher. |
+| `suppress_checkpoint` | flag (commented) | Do not save periodic checkpoints. |
+| `suppress_best_checkpoint` | flag | Do not save `best_model.pt`. |
+| `checkpoint_every` | `-1` | Save a checkpoint every N epochs (`-1` = only the last). |
+
+Advanced defaults inherited from torchtrainer's `DefaultTrainer` (rarely set here): `device`,
+`use_amp`, `deterministic`, `benchmark`, `momentum`, `patience`, `augmentation_strategy`, `seed`,
+`copy_model_every`, `meta`.
+
+### `experiment_params` (few-shot sweep loop)
+
+| Parameter | Example | Description |
+|---|---|---|
+| `min_samples` | `1` | First number of labeled samples in the sweep. |
+| `max_samples` | drive/vessmap 16, dca1/octa2d 20 | Last number of labeled samples. |
+| `runs` | `5` | Random sample combinations per sample count. |
+| `reps` | `3` | Repetitions (seeds) per combination. |
+| `with_replacement` | `False` | Sample with replacement. |
+| `output_dir` | `experiments` | Base output dir (relative to the dataset folder). |
+| `step` | `2` | Increment of the sample count between sweep points. |
+| `csv_path` | `/.../train.csv` | CSV of image IDs to sample from. |
+| `weights_id` | `imagenet\|vsunet18\|vsunet50\|FromScratch` | Label embedded in output folder names. |
+
+### `test_params` (inference)
+
+| Parameter | Example | Description |
+|---|---|---|
+| `run_path` | `''` | Set automatically by the launcher. |
+| `dataset_path` | `/.../DRIVE` | Dataset root for inference. |
+| `dataset_class` | `drive` | Test dataset class (without `_few`). |
+| `model_class` | `resnet18_unet` | Model architecture. |
+| `channels` / `resize_size` | `rgb` / `'256 256'` | Used by LiteMedSAM. |
+| `checkpoint_type` | `best\|last` | Which checkpoint to load. |
+| `use_amp` | flag | Mixed precision. |
+| `save_inference_images` | flag | Save prediction images. |
+| `inference_dir_name` | `inference_results` | Output subfolder name. |
+| `tta_type` | `none\|logits\|probs` | Test-time augmentation. |
+| `threshold` | `0.5` | Binary threshold (`-1` maximizes Dice on train). |
+| `encoder_weights` / `imagenet_normalize` / `skip_checkpoint_loading` | — | Loading variants (e.g. ImageNet zero-shot). |
+| `seed` / `device` / `deterministic` / `benchmark` | — | Execution controls. |
+| `force_headless` / `skip_boxplot` | flag | Plotting orchestration. |
+
+**Inference orchestration** (read by the launcher, not `test.py`): `delete_checkpoint`,
+`batch_inference`, `enable_inference`, `max_inference_retries`, `delete_only_on_success`,
+`aggregate_inference_means`.
 
 ## Output Conventions & Reproducibility
 

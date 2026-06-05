@@ -3,25 +3,34 @@ import os
 import argparse
 
 # Add the project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+STAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.abspath(os.path.join(STAGE_ROOT, '..')))
 
 from src.few_shot_train import run_experiments, load_params_from_yaml
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run few-shot training experiments")
+    parser = argparse.ArgumentParser(description="Run serial few-shot training-from-scratch experiments")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        help="Dataset subfolder under this stage (e.g. dca1, drive, octa2d, vessmap)"
+    )
     parser.add_argument(
         "--config_file",
         type=str,
         default="config.yaml",
-        help="Path to the configuration file (default: config.yaml)"
+        help="Configuration file name inside the dataset folder (default: config.yaml)"
     )
     args = parser.parse_args()
-    config_path = args.config_file
-    train_params, experiment_params, test_params = load_params_from_yaml(config_path)
+
+    # Run from inside the dataset folder so configs and outputs (experiments/) resolve there
+    os.chdir(os.path.join(STAGE_ROOT, args.dataset))
+
+    train_params, experiment_params, test_params = load_params_from_yaml(args.config_file)
     run_experiments(
         train_params,
         experiment_params['csv_path'],
-        
         min_samples=experiment_params.get('min_samples', 1),
         max_samples=experiment_params.get('max_samples', 20),
         runs=experiment_params.get('runs', 10),
