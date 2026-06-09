@@ -1,0 +1,5 @@
+# Web-app backend deps. These are *in addition* to the experiment env
+# (torch, pandas, numpy, scipy, matplotlib, seaborn, pyyaml are already installed).
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9

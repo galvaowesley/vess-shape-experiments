@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens — "Data-Dense Dashboard": calm, scientific, light + dark. */
+:root {
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --border: #dbeafe;
+  --fg: #16243f;
+  --muted: #e9eef6;
+  --muted-fg: #5b6b86;
+  --primary: #1e40af;
+  --primary-fg: #ffffff;
+  --accent: #b45309;
+  --accent-fg: #ffffff;
+  --ring: #2563eb;
+  --danger: #dc2626;
+  --success: #15803d;
+}
+
+.dark {
+  --bg: #0b1220;
+  --surface: #111a2e;
+  --surface-2: #0e1626;
+  --border: #25324b;
+  --fg: #e6edf7;
+  --muted: #1a2540;
+  --muted-fg: #93a3bd;
+  --primary: #3b82f6;
+  --primary-fg: #06122b;
+  --accent: #f59e0b;
+  --accent-fg: #1b1303;
+  --ring: #60a5fa;
+  --danger: #f87171;
+  --success: #4ade80;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Fira Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* thin, calm scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* react-colorful sizing */
+.react-colorful {
+  width: 100% !important;
+  height: 180px;
+}
