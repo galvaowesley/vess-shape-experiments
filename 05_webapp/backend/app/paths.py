@@ -35,6 +35,7 @@ STAGES: dict[str, dict[str, str]] = {
 # App-private runtime state (gitignored). Never written into experiment folders.
 DATA_DIR: Path = WEBAPP_DIR / ".data"
 FIGURES_STORE: Path = DATA_DIR / "figures.json"
+STYLE_STORE: Path = DATA_DIR / "style_prefs.json"
 
 
 def ensure_sys_path() -> None:

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Play, Save, Square } from "lucide-react";
+import { Activity, Play, Save, Settings, Square } from "lucide-react";
 import { api } from "../lib/api";
 import type { TrainingOptions, TrainingRequest, TrainingStatus } from "../lib/types";
 import { useDebounced } from "../lib/util";
@@ -14,7 +14,7 @@ import {
   Select,
   TextInput,
 } from "../components/ui";
-import { LogConsole } from "../components/LogConsole";
+import { MonitorPanel } from "../components/MonitorPanel";
 import { PageHeader, InlineNote } from "../components/common";
 
 const DS_DIR: Record<string, string> = {
@@ -47,13 +47,34 @@ function defaults(): TrainingRequest {
     weight_decay: 0,
     lr_decay: 1,
     optimizer: "adam",
+    momentum: 0.9,
     validate_every: 5,
     validation_metric: "Dice",
+    maximize_validation_metric: false,
+    patience: null,
     loss_function: null,
     resize_size: "256 256",
     channels: null,
+    augmentation_strategy: null,
+    dataset_params: null,
+    model_params: null,
     num_workers: 12,
     ignore_class_weights: false,
+    log_wandb: false,
+    wandb_project: "",
+    wandb_group: "",
+    save_val_imgs: false,
+    val_img_indices: "0 1 2",
+    disable_tqdm: false,
+    meta: null,
+    checkpoint_every: -1,
+    copy_model_every: 0,
+    suppress_checkpoint: false,
+    suppress_best_checkpoint: true,
+    device: "cuda:0",
+    use_amp: false,
+    deterministic: false,
+    benchmark: false,
     min_samples: 1,
     max_samples: 20,
     step: 2,
@@ -67,6 +88,17 @@ function defaults(): TrainingRequest {
     batch_inference: true,
     save_inference_images: false,
     delete_checkpoint: true,
+    inference_dir_name: "inference_results",
+    tta_type: "none",
+    threshold: 0.5,
+    test_use_amp: false,
+    imagenet_normalize: false,
+    skip_checkpoint_loading: false,
+    force_headless: true,
+    skip_boxplot: true,
+    max_inference_retries: 1,
+    delete_only_on_success: true,
+    aggregate_inference_means: true,
   };
 }
 
@@ -77,6 +109,7 @@ export default function Training() {
   const [filename, setFilename] = useState("");
   const [status, setStatus] = useState<TrainingStatus | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [tab, setTab] = useState<"config" | "monitor">("config");
   const debounced = useDebounced(req, 300);
 
   useEffect(() => {
@@ -260,8 +293,35 @@ export default function Training() {
               <Field label="Optimizer">
                 <Select value={req.optimizer} onChange={(v) => patch({ optimizer: v })} options={(opts?.optimizers ?? ["adam"]).map((o) => ({ value: o, label: o }))} />
               </Field>
+              <Field label="Momentum / β1">
+                <NumberInput value={req.momentum} step={0.01} onChange={(v) => patch({ momentum: v ?? 0.9 })} />
+              </Field>
               <Field label="Validate every">
                 <NumberInput value={req.validate_every} onChange={(v) => patch({ validate_every: v ?? 5 })} />
+              </Field>
+              <Field label="Validation metric">
+                <Select
+                  value={req.validation_metric}
+                  onChange={(v) => patch({ validation_metric: v })}
+                  options={(opts?.validation_metrics ?? ["Dice"]).map((m) => ({ value: m, label: m }))}
+                />
+              </Field>
+              <Field label="Patience (blank = off)">
+                <NumberInput value={req.patience ?? null} onChange={(v) => patch({ patience: v })} />
+              </Field>
+              <Field label="Loss function">
+                <Select
+                  value={req.loss_function ?? "auto"}
+                  onChange={(v) => patch({ loss_function: v === "auto" ? null : v })}
+                  options={[{ value: "auto", label: "auto" }, ...(opts?.loss_functions ?? ["cross_entropy", "bce"]).map((o) => ({ value: o, label: o }))]}
+                />
+              </Field>
+              <Field label="Channels">
+                <Select
+                  value={req.channels ?? "auto"}
+                  onChange={(v) => patch({ channels: v === "auto" ? null : v })}
+                  options={[{ value: "auto", label: "auto (per dataset)" }, ...(opts?.channels ?? ["all", "rgb", "gray"]).map((o) => ({ value: o, label: o }))]}
+                />
               </Field>
               <Field label="Resize (H W)">
                 <TextInput value={req.resize_size} onChange={(e) => patch({ resize_size: e.target.value })} />
@@ -270,7 +330,65 @@ export default function Training() {
                 <NumberInput value={req.num_workers} onChange={(v) => patch({ num_workers: v ?? 12 })} />
               </Field>
             </div>
+            <Field label="Augmentation strategy (optional)">
+              <TextInput value={req.augmentation_strategy ?? ""} placeholder="passed to dataset fn" onChange={(e) => patch({ augmentation_strategy: e.target.value || null })} />
+            </Field>
+            <Checkbox checked={req.maximize_validation_metric} onChange={(v) => patch({ maximize_validation_metric: v })} label="Maximize validation metric (early stopping)" />
             <Checkbox checked={req.ignore_class_weights} onChange={(v) => patch({ ignore_class_weights: v })} label="Ignore class weights" />
+          </Section>
+
+          <Section title="Logging & W&B">
+            <Checkbox checked={req.log_wandb} onChange={(v) => patch({ log_wandb: v })} label="Log to Weights & Biases" />
+            {req.log_wandb && (
+              <>
+                <Field label="W&B project" hint="blank → experiment name">
+                  <TextInput value={req.wandb_project ?? ""} placeholder={req.experiment_name || "experiment name"} onChange={(e) => patch({ wandb_project: e.target.value })} />
+                </Field>
+                <Field label="W&B group" hint="set automatically per run (model | lr | weights_id | n_samples)">
+                  <TextInput value={req.wandb_group ?? ""} placeholder="auto per run" disabled onChange={(e) => patch({ wandb_group: e.target.value })} />
+                </Field>
+              </>
+            )}
+            <Checkbox checked={req.save_val_imgs} onChange={(v) => patch({ save_val_imgs: v })} label="Save validation images" />
+            {req.save_val_imgs && (
+              <Field label="Validation image indices">
+                <TextInput value={req.val_img_indices} placeholder="0 1 2" onChange={(e) => patch({ val_img_indices: e.target.value })} />
+              </Field>
+            )}
+            <Field label="Meta (optional)" hint="extra text saved to config.json">
+              <TextInput value={req.meta ?? ""} onChange={(e) => patch({ meta: e.target.value || null })} />
+            </Field>
+            <Checkbox checked={req.disable_tqdm} onChange={(v) => patch({ disable_tqdm: v })} label="Disable tqdm progress bar" />
+          </Section>
+
+          <Section title="Checkpointing" defaultOpen={false}>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Checkpoint every" hint="0 each · N every N · -1 last">
+                <NumberInput value={req.checkpoint_every} onChange={(v) => patch({ checkpoint_every: v ?? -1 })} />
+              </Field>
+              <Field label="Copy model every" hint="0 = never">
+                <NumberInput value={req.copy_model_every} onChange={(v) => patch({ copy_model_every: v ?? 0 })} />
+              </Field>
+            </div>
+            <Checkbox checked={req.suppress_best_checkpoint} onChange={(v) => patch({ suppress_best_checkpoint: v })} label="Suppress best checkpoint" />
+            <Checkbox checked={req.suppress_checkpoint} onChange={(v) => patch({ suppress_checkpoint: v })} label="Suppress all checkpointing" />
+          </Section>
+
+          <Section title="Device & efficiency" defaultOpen={false}>
+            <Field label="Device">
+              <TextInput value={req.device} placeholder="cuda:0" onChange={(e) => patch({ device: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Dataset params (optional)">
+                <TextInput value={req.dataset_params ?? ""} placeholder="p1=v1 p2=v2" onChange={(e) => patch({ dataset_params: e.target.value || null })} />
+              </Field>
+              <Field label="Model params (optional)">
+                <TextInput value={req.model_params ?? ""} placeholder="p1=v1 p2=v2" onChange={(e) => patch({ model_params: e.target.value || null })} />
+              </Field>
+            </div>
+            <Checkbox checked={req.use_amp} onChange={(v) => patch({ use_amp: v })} label="Automatic mixed precision (AMP)" />
+            <Checkbox checked={req.deterministic} onChange={(v) => patch({ deterministic: v })} label="Deterministic algorithms" />
+            <Checkbox checked={req.benchmark} onChange={(v) => patch({ benchmark: v })} label="cuDNN benchmark" />
           </Section>
 
           <Section title="Few-shot loop">
@@ -290,6 +408,12 @@ export default function Training() {
               <Field label="Reps (seeds)">
                 <NumberInput value={req.reps} onChange={(v) => patch({ reps: v ?? 3 })} />
               </Field>
+              <Field label="Output dir">
+                <TextInput value={req.output_dir} onChange={(e) => patch({ output_dir: e.target.value })} />
+              </Field>
+              <Field label="Weights id (blank = auto)">
+                <TextInput value={req.weights_id ?? ""} placeholder="auto" onChange={(e) => patch({ weights_id: e.target.value || null })} />
+              </Field>
             </div>
             <Checkbox checked={req.with_replacement} onChange={(v) => patch({ with_replacement: v })} label="Sample with replacement" />
           </Section>
@@ -305,20 +429,66 @@ export default function Training() {
                 ]}
               />
             </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Inference dir name">
+                <TextInput value={req.inference_dir_name} onChange={(e) => patch({ inference_dir_name: e.target.value })} />
+              </Field>
+              <Field label="TTA type">
+                <Select
+                  value={req.tta_type}
+                  onChange={(v) => patch({ tta_type: v as any })}
+                  options={(opts?.tta_types ?? ["none", "logits", "probs"]).map((o) => ({ value: o, label: o }))}
+                />
+              </Field>
+              <Field label="Threshold" hint="-1 = optimize on train">
+                <NumberInput value={req.threshold} step={0.05} onChange={(v) => patch({ threshold: v ?? 0.5 })} />
+              </Field>
+              <Field label="Max inference retries">
+                <NumberInput value={req.max_inference_retries} onChange={(v) => patch({ max_inference_retries: v ?? 1 })} />
+              </Field>
+            </div>
             <Checkbox checked={req.enable_inference} onChange={(v) => patch({ enable_inference: v })} label="Run inference after training" />
             <Checkbox checked={req.batch_inference} onChange={(v) => patch({ batch_inference: v })} label="Batch inference (defer to end)" />
             <Checkbox checked={req.save_inference_images} onChange={(v) => patch({ save_inference_images: v })} label="Save inference images" />
             <Checkbox checked={req.delete_checkpoint} onChange={(v) => patch({ delete_checkpoint: v })} label="Delete checkpoint after inference" />
+            <Checkbox checked={req.delete_only_on_success} onChange={(v) => patch({ delete_only_on_success: v })} label="Delete only if inference succeeded" />
+            <Checkbox checked={req.aggregate_inference_means} onChange={(v) => patch({ aggregate_inference_means: v })} label="Aggregate mean metrics to CSV" />
+            <Checkbox checked={req.test_use_amp} onChange={(v) => patch({ test_use_amp: v })} label="Inference AMP" />
+            <Checkbox checked={req.imagenet_normalize} onChange={(v) => patch({ imagenet_normalize: v })} label="ImageNet normalize inputs" />
+            <Checkbox checked={req.skip_checkpoint_loading} onChange={(v) => patch({ skip_checkpoint_loading: v })} label="Skip checkpoint loading (random/encoder weights)" />
+            <Checkbox checked={req.force_headless} onChange={(v) => patch({ force_headless: v })} label="Headless matplotlib backend" />
+            <Checkbox checked={req.skip_boxplot} onChange={(v) => patch({ skip_boxplot: v })} label="Skip boxplot generation" />
           </Section>
         </div>
 
-        {/* yaml preview + console */}
-        <div className="flex flex-col gap-3 overflow-hidden p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm text-muted-fg">
-              Generated config:
-              <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-fg">{filename}</span>
+        {/* right panel */}
+        <div className="flex flex-col overflow-hidden">
+          {/* Tab bar + action buttons */}
+          <div className="flex items-center justify-between border-b border-border px-5 py-2 gap-2">
+            {/* Tabs */}
+            <div className="inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
+              <button
+                onClick={() => setTab("config")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                  tab === "config"
+                    ? "bg-primary text-primary-fg"
+                    : "text-muted-fg hover:text-fg"
+                }`}
+              >
+                <Settings className="h-3.5 w-3.5" /> Config
+              </button>
+              <button
+                onClick={() => setTab("monitor")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                  tab === "monitor"
+                    ? "bg-primary text-primary-fg"
+                    : "text-muted-fg hover:text-fg"
+                }`}
+              >
+                <Activity className="h-3.5 w-3.5" /> Monitor
+              </button>
             </div>
+            {/* Action buttons */}
             <div className="flex items-center gap-2">
               <Button variant="default" onClick={() => save(false)}>
                 <Save className="h-4 w-4" /> Save config
@@ -338,14 +508,27 @@ export default function Training() {
             </div>
           </div>
 
-          {msg && <InlineNote tone="success">{msg}</InlineNote>}
+          {msg && <div className="px-5 pt-2"><InlineNote tone="success">{msg}</InlineNote></div>}
 
-          <div className="grid flex-1 grid-rows-2 gap-3 overflow-hidden">
-            <pre className="overflow-auto rounded-lg border border-border bg-surface-2 p-3 font-mono text-[12px] leading-relaxed text-fg">
-              {yaml}
-            </pre>
-            <LogConsole />
-          </div>
+          {/* Config tab: YAML preview */}
+          {tab === "config" && (
+            <div className="flex flex-col gap-2 overflow-hidden p-5 flex-1">
+              <div className="flex items-center gap-2 text-sm text-muted-fg">
+                Generated config:
+                <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-fg">{filename}</span>
+              </div>
+              <pre className="flex-1 overflow-auto rounded-lg border border-border bg-surface-2 p-3 font-mono text-[12px] leading-relaxed text-fg">
+                {yaml}
+              </pre>
+            </div>
+          )}
+
+          {/* Monitor tab */}
+          {tab === "monitor" && (
+            <div className="flex-1 overflow-hidden">
+              <MonitorPanel active={tab === "monitor"} />
+            </div>
+          )}
         </div>
       </div>
     </div>

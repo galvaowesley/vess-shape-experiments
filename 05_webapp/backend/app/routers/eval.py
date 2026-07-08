@@ -6,8 +6,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, Response
 
-from .. import data, palettes, plotting
-from ..schemas import PlotSpec
+from .. import data, palettes, plotting, style, tables
+from ..schemas import PlotSpec, StylePrefs, TableSpec
 
 router = APIRouter(prefix="/api/eval", tags=["eval"])
 
@@ -24,6 +24,33 @@ def metadata(source: str = Query("per_run"),
 @router.get("/palettes")
 def get_palettes():
     return palettes.catalog_with_swatches()
+
+
+@router.get("/style")
+def get_style():
+    """Saved global colors/order + the paper palette (hex) as a starting point."""
+    import matplotlib.colors as mcolors
+
+    defaults: dict[str, str] = {}
+    for name, col in plotting._model_palette().items():
+        try:
+            defaults[name] = mcolors.to_hex(col)
+        except (ValueError, TypeError):
+            continue
+    return {**style.get_prefs(), "defaults": defaults}
+
+
+@router.put("/style")
+def put_style(prefs: StylePrefs):
+    return style.save_prefs(prefs)
+
+
+@router.post("/table")
+def table(spec: TableSpec):
+    try:
+        return tables.render_table(spec)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Table failed: {exc}") from exc
 
 
 @router.post("/render")

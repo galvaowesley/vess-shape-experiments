@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from .. import data, training
 from ..schemas import SaveConfigRequest, TrainingRequest
+from ..system_metrics import collector as _sys
 
 router = APIRouter(prefix="/api/training", tags=["training"])
 
@@ -26,6 +27,9 @@ def options():
         "optimizers": ["adam", "sgd", "adamw"],
         "loss_functions": ["cross_entropy", "bce"],
         "checkpoint_types": ["last", "best"],
+        "channels": ["all", "rgb", "gray"],
+        "tta_types": ["none", "logits", "probs"],
+        "validation_metrics": ["Dice", "IoU", "Validation loss"],
         "dataset_defaults": training._DATASET_DEFAULTS,
     }
 
@@ -66,6 +70,20 @@ def stop():
 @router.get("/status")
 def status():
     return training.manager.status()
+
+
+@router.get("/progress")
+def progress():
+    return {
+        "progress": training.manager._parser.progress(),
+        "epoch_metrics": training.manager._parser.epoch_metrics(),
+    }
+
+
+@router.get("/system-metrics")
+def system_metrics():
+    _sys.start()   # no-op if already started
+    return _sys.snapshot()
 
 
 @router.websocket("/logs")

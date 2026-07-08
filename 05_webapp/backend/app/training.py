@@ -18,7 +18,9 @@ from pathlib import Path
 import yaml
 
 from . import paths
+from .log_parser import LogParser
 from .schemas import TrainingRequest
+from .system_metrics import collector as _sys_collector
 
 # Per-dataset defaults observed in the existing configs.
 _DATASET_DEFAULTS = {
@@ -68,7 +70,9 @@ def build_config(req: TrainingRequest) -> dict:
     resize = req.resize_size or dd["resize"]
     exp_name = req.experiment_name or f"multi_{req.stage}_{req.dataset}_{req.model_class}_{_weights_id(req)}"
 
-    train: dict = {"experiment_name": exp_name}
+    # `run_name`, `wandb_group`, `seed` and `split_strategy` are overwritten per
+    # run by the serial launcher, so their YAML values are placeholders only.
+    train: dict = {"experiment_name": exp_name, "run_name": ""}
     # pretraining source (finetune only)
     if req.stage == "finetune":
         if req.pretraining == "vessshape" and req.weights_path:
@@ -76,36 +80,84 @@ def build_config(req: TrainingRequest) -> dict:
         elif req.pretraining == "imagenet":
             train["encoder_weights"] = "imagenet"
 
+    train["validate_every"] = req.validate_every
+    if req.save_val_imgs:
+        train["save_val_imgs"] = ""               # store_true flag
+        if req.val_img_indices.strip():
+            train["val_img_indices"] = req.val_img_indices
+
     train.update({
-        "validate_every": req.validate_every,
         "dataset_path": req.dataset_path,
         "dataset_class": f"{req.dataset}_few",
         "split_strategy": "",
         "channels": channels,
         "resize_size": resize,
     })
+    if req.augmentation_strategy:
+        train["augmentation_strategy"] = req.augmentation_strategy
+    if req.dataset_params:
+        train["dataset_params"] = req.dataset_params
+
     if is_lms:
         train["loss_function"] = "bce"
-        train["model_params"] = "freeze_encoder=False"
     elif req.loss_function:
         train["loss_function"] = req.loss_function
+
+    train["model_class"] = req.model_class
+    if is_lms:
+        train["model_params"] = req.model_params or "freeze_encoder=False"
+    elif req.model_params:
+        train["model_params"] = req.model_params
+
+    train["num_epochs"] = req.num_epochs
+    train["validation_metric"] = req.validation_metric
+    if req.maximize_validation_metric:
+        train["maximize_validation_metric"] = ""  # store_true flag
+    if req.patience is not None:
+        train["patience"] = req.patience
+
     train.update({
-        "model_class": req.model_class,
-        "num_epochs": req.num_epochs,
-        "validation_metric": req.validation_metric,
-        "maximize_validation_metric": "",
         "bs_train": req.bs_train,
         "bs_valid": req.bs_valid,
         "weight_decay": req.weight_decay,
         "lr": req.lr,
         "lr_decay": req.lr_decay,
-        "optimizer": req.optimizer,
-        "num_workers": req.num_workers,
-        "suppress_best_checkpoint": "",
-        "checkpoint_every": -1,
     })
+    if req.optimizer == "sgd" or req.momentum != 0.9:
+        train["momentum"] = req.momentum
+    train["optimizer"] = req.optimizer
     if req.ignore_class_weights:
-        train["ignore_class_weights"] = ""
+        train["ignore_class_weights"] = ""        # store_true flag
+    train["num_workers"] = req.num_workers
+
+    # device & efficiency (training)
+    if req.device and req.device != "cuda:0":
+        train["device"] = req.device
+    if req.use_amp:
+        train["use_amp"] = ""
+    if req.deterministic:
+        train["deterministic"] = ""
+    if req.benchmark:
+        train["benchmark"] = ""
+
+    # weights & biases
+    if req.log_wandb:
+        train["log_wandb"] = ""                    # store_true flag
+        train["wandb_project"] = req.wandb_project or exp_name
+        train["wandb_group"] = req.wandb_group or ""   # placeholder; set per run
+    if req.disable_tqdm:
+        train["disable_tqdm"] = ""
+    if req.meta:
+        train["meta"] = req.meta
+
+    # checkpointing
+    if req.suppress_checkpoint:
+        train["suppress_checkpoint"] = ""
+    if req.suppress_best_checkpoint:
+        train["suppress_best_checkpoint"] = ""
+    train["checkpoint_every"] = req.checkpoint_every
+    if req.copy_model_every:
+        train["copy_model_every"] = req.copy_model_every
 
     experiment = {
         "min_samples": req.min_samples,
@@ -119,27 +171,48 @@ def build_config(req: TrainingRequest) -> dict:
         "weights_id": _weights_id(req),
     }
 
-    test = {
+    test: dict = {
         "run_path": "",
         "dataset_path": req.dataset_path,
         "dataset_class": req.dataset,
         "model_class": req.model_class,
         "resize_size": resize,
-        "checkpoint_type": req.checkpoint_type,
-        "inference_dir_name": "inference_results",
-        "delete_checkpoint": req.delete_checkpoint,
-        "batch_inference": req.batch_inference,
-        "enable_inference": req.enable_inference,
-        "force_headless": True,
-        "skip_boxplot": True,
-        "max_inference_retries": 1,
-        "delete_only_on_success": True,
-        "aggregate_inference_means": True,
     }
     if is_lms:
         test["channels"] = channels
     if req.save_inference_images:
         test["save_inference_images"] = ""
+    test["checkpoint_type"] = req.checkpoint_type
+    test["inference_dir_name"] = req.inference_dir_name or "inference_results"
+    if req.tta_type and req.tta_type != "none":
+        test["tta_type"] = req.tta_type
+    if req.threshold != 0.5:
+        test["threshold"] = req.threshold
+    if req.imagenet_normalize:
+        test["imagenet_normalize"] = ""
+    if req.skip_checkpoint_loading:
+        test["skip_checkpoint_loading"] = ""
+    if req.test_use_amp:
+        test["use_amp"] = ""
+    if req.deterministic:
+        test["deterministic"] = ""
+    if req.benchmark:
+        test["benchmark"] = ""
+    if req.device and req.device != "cuda:0":
+        test["device"] = req.device
+    if req.dataset_params:
+        test["dataset_params"] = req.dataset_params
+    # inference orchestration (consumed by run_serial, not test.py)
+    test.update({
+        "delete_checkpoint": req.delete_checkpoint,
+        "batch_inference": req.batch_inference,
+        "enable_inference": req.enable_inference,
+        "force_headless": req.force_headless,
+        "skip_boxplot": req.skip_boxplot,
+        "max_inference_retries": req.max_inference_retries,
+        "delete_only_on_success": req.delete_only_on_success,
+        "aggregate_inference_means": req.aggregate_inference_means,
+    })
 
     return {"train_params": train, "experiment_params": experiment, "test_params": test}
 
@@ -175,6 +248,8 @@ class JobManager:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._meta: dict = {}
         self._lock = threading.Lock()
+        self._parser = LogParser()
+        _sys_collector.start()
 
     # --- subscription (used by the WS endpoint) ---------------------------- #
     def subscribe(self) -> asyncio.Queue:
@@ -190,6 +265,7 @@ class JobManager:
 
     def _emit(self, line: str) -> None:
         self._buffer.append(line)
+        self._parser.on_line(line)
         if self._loop is None:
             return
         for q in list(self._subscribers):
@@ -218,6 +294,10 @@ class JobManager:
             env = {**os.environ, "PYTHONUNBUFFERED": "1"}
             self._loop = loop
             self._buffer.clear()
+            self._parser.reset(
+                runs=req.runs, reps=req.reps,
+                min_samples=req.min_samples, max_samples=req.max_samples, step=req.step,
+            )
             self._proc = subprocess.Popen(
                 cmd, cwd=stage["dir"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, env=env, start_new_session=True,
@@ -252,5 +332,6 @@ class JobManager:
         return {"stopped": True}
 
 
-# Module-level singleton used by the router.
+# Module-level singletons used by the router.
 manager = JobManager()
+sys_collector = _sys_collector

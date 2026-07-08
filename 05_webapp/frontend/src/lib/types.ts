@@ -26,6 +26,7 @@ export interface AxisSpec {
   tick_rotation: number;
   min?: number | null;
   max?: number | null;
+  tick_step?: number | null;
   percentage: boolean;
 }
 
@@ -54,23 +55,39 @@ export interface ExportSpec {
   save_path?: string | null;
 }
 
+export type AggregateDatasets = "none" | "pool" | "macro";
+
 export interface PlotSpec {
   chart_type: ChartType;
   data: DataSpec;
   encoding: Encoding;
   facet?: string | null;
+  aggregate_datasets: AggregateDatasets;
   palette?: string | null;
   x_axis: AxisSpec;
   y_axis: AxisSpec;
   title: TitleSpec;
   fonts: Record<string, number>;
   series_styles: Record<string, SeriesStyle>;
+  series_order: string[];
+  category_order: string[];
   legend: LegendSpec;
   show_error_band: boolean;
+  error_type: "std" | "sem";
+  error_alpha: number;
   show_grid: boolean;
   marker_size: number;
   figure: { size: [number, number] };
   export: ExportSpec;
+}
+
+/** Global colors/order applied to every chart (persisted webapp-side). */
+export interface StylePrefs {
+  colors: Record<string, string>;
+  order: Record<string, string[]>;
+}
+export interface StylePrefsResponse extends StylePrefs {
+  defaults: Record<string, string>;
 }
 
 export interface WilcoxonColors {
@@ -125,13 +142,54 @@ export interface PaletteEntry {
 }
 export type PaletteCatalog = Record<string, PaletteEntry[]>;
 
+export type Aggregation = "mean" | "std" | "mean_std" | "median" | "min" | "max" | "count";
+
+export interface TableSpec {
+  source: Source;
+  datasets: string[];
+  model_types: string[];
+  stages: string[];
+  regimes: string[];
+  sample_filter: number[];
+  exclude_mock: boolean;
+  rows: string[];
+  columns: string[];
+  values: string[]; // metric names or "__count__"
+  aggregation: Aggregation;
+  decimals: number;
+  percentage: boolean;
+  sort_by?: string | null;
+  ascending: boolean;
+  title: string;
+}
+
+export interface TableResult {
+  columns: string[];
+  rows: (string | number | null)[][];
+  caption: string;
+  n_rows: number;
+  markdown: string;
+  csv: string;
+  latex: string;
+}
+
+export type DashboardKind = "figure" | "wilcoxon" | "table";
+
 export interface DashboardItem {
   id?: string;
+  dashboard_id?: string | null;
   title: string;
-  kind: "figure" | "wilcoxon";
+  kind: DashboardKind;
   regime?: string | null;
-  spec: PlotSpec | WilcoxonSpec | Record<string, unknown>;
+  spec: PlotSpec | WilcoxonSpec | TableSpec | Record<string, unknown>;
   created_at?: string;
+}
+
+export interface DashboardMeta {
+  id: string;
+  name: string;
+  created_at?: string;
+  count?: number;
 }
 
 export interface TrainingOptions {
@@ -145,6 +203,9 @@ export interface TrainingOptions {
   optimizers: string[];
   loss_functions: string[];
   checkpoint_types: string[];
+  channels: string[];
+  tta_types: string[];
+  validation_metrics: string[];
   dataset_defaults: Record<string, { resize: string; channels: string }>;
 }
 
@@ -165,13 +226,38 @@ export interface TrainingRequest {
   weight_decay: number;
   lr_decay: number;
   optimizer: string;
+  momentum: number;
   validate_every: number;
   validation_metric: string;
+  maximize_validation_metric: boolean;
+  patience?: number | null;
   loss_function?: string | null;
   resize_size: string;
   channels?: string | null;
+  augmentation_strategy?: string | null;
+  dataset_params?: string | null;
+  model_params?: string | null;
   num_workers: number;
   ignore_class_weights: boolean;
+  // logging & wandb
+  log_wandb: boolean;
+  wandb_project?: string | null;
+  wandb_group?: string | null;
+  save_val_imgs: boolean;
+  val_img_indices: string;
+  disable_tqdm: boolean;
+  meta?: string | null;
+  // checkpointing
+  checkpoint_every: number;
+  copy_model_every: number;
+  suppress_checkpoint: boolean;
+  suppress_best_checkpoint: boolean;
+  // device & efficiency
+  device: string;
+  use_amp: boolean;
+  deterministic: boolean;
+  benchmark: boolean;
+  // few-shot loop
   min_samples: number;
   max_samples: number;
   step: number;
@@ -180,11 +266,23 @@ export interface TrainingRequest {
   with_replacement: boolean;
   output_dir: string;
   weights_id?: string | null;
+  // inference
   checkpoint_type: "last" | "best";
   enable_inference: boolean;
   batch_inference: boolean;
   save_inference_images: boolean;
   delete_checkpoint: boolean;
+  inference_dir_name: string;
+  tta_type: "none" | "logits" | "probs";
+  threshold: number;
+  test_use_amp: boolean;
+  imagenet_normalize: boolean;
+  skip_checkpoint_loading: boolean;
+  force_headless: boolean;
+  skip_boxplot: boolean;
+  max_inference_retries: number;
+  delete_only_on_success: boolean;
+  aggregate_inference_means: boolean;
 }
 
 export interface TrainingStatus {

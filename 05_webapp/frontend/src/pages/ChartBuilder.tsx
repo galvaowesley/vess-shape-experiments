@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Download, Pin, RefreshCw, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
 import type { AxisSpec, Metadata, PaletteCatalog, PlotSpec } from "../lib/types";
-import { defaultPlotSpec, LEGEND_LOCS, LINESTYLES, MARKERS, PRESETS } from "../lib/plotSpec";
+import { defaultPlotSpec, hydratePlotSpec, LEGEND_LOCS, LINESTYLES, MARKERS, PRESETS } from "../lib/plotSpec";
 import { useDebounced, useObjectUrl } from "../lib/util";
 import {
   Badge,
@@ -19,6 +20,7 @@ import {
 } from "../components/ui";
 import { ColorWheel } from "../components/ColorWheel";
 import { PalettePicker } from "../components/PalettePicker";
+import { PinDialog, type PinResult } from "../components/PinDialog";
 import { PageHeader, PreviewPane, InlineNote } from "../components/common";
 
 const ALL_DATASETS = ["vessmap", "drive", "dca1", "octa2d"];
@@ -37,9 +39,25 @@ export default function ChartBuilder() {
   const [error, setError] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [editItemId, setEditItemId] = useState<string | null>(null);
+
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useObjectUrl(url);
   const debounced = useDebounced(spec, 250);
+
+  // Re-open a pinned figure for editing (navigated from the Dashboard).
+  useEffect(() => {
+    const st = location.state as { editSpec?: Record<string, unknown>; editItemId?: string } | null;
+    if (st?.editSpec) {
+      setSpec(hydratePlotSpec(st.editSpec));
+      setEditItemId(st.editItemId ?? null);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // palettes once
   useEffect(() => {
@@ -107,6 +125,21 @@ export default function ChartBuilder() {
     ...(meta?.facet_fields ?? ["regime"]).map((f) => ({ value: f, label: f })),
   ];
 
+  // sample-size (N) options for bar charts — N=0 surfaces the zero-shot models
+  const barNOptions = [
+    { value: "all", label: "All N (pooled)" },
+    ...opt("num_samples").map((n) => ({
+      value: n,
+      label: n === "0" ? "0 — Zero-shot" : n === "1" ? "1 — One-shot" : `N = ${n}`,
+    })),
+  ];
+  const currentBarN = (() => {
+    const r = spec.data.num_samples_range;
+    return r && r[0] === r[1] ? String(r[0]) : "all";
+  })();
+  const setBarN = (v: string) =>
+    patchData({ num_samples_range: v === "all" ? null : [Number(v), Number(v)] });
+
   /* ---- actions ---- */
   async function doExport() {
     setMsg(null);
@@ -125,21 +158,30 @@ export default function ChartBuilder() {
     }
   }
 
-  async function doPin() {
-    setMsg(null);
+  const pinTitle = spec.title.text || `${spec.chart_type} · ${spec.encoding.y}`;
+
+  async function handlePin({ dashboardId, title, mode }: PinResult) {
     const regime =
       spec.facet === "regime"
         ? "faceted"
         : spec.data.regimes.length === 1
           ? spec.data.regimes[0]
           : null;
-    await api.pin({
-      title: spec.title.text || `${spec.chart_type} · ${spec.encoding.y}`,
-      kind: "figure",
+    const payload = {
+      title,
+      kind: "figure" as const,
       regime,
+      dashboard_id: dashboardId,
       spec: spec as unknown as Record<string, unknown>,
-    });
-    setMsg("Pinned to dashboard.");
+    };
+    if (mode === "update" && editItemId) {
+      await api.updatePin(editItemId, payload);
+      setMsg("Updated pinned figure.");
+    } else {
+      const created = await api.pin(payload);
+      setEditItemId(created.id ?? null);
+      setMsg("Pinned to dashboard.");
+    }
   }
 
   async function doRescan() {
@@ -266,33 +308,50 @@ export default function ChartBuilder() {
                 />
               </Field>
             </div>
-            <Field label="Samples range (min / max)">
-              <div className="flex items-center gap-2">
-                <NumberInput
-                  value={spec.data.num_samples_range?.[0] ?? null}
-                  onChange={(v) =>
-                    patchData({
-                      num_samples_range:
-                        v == null && spec.data.num_samples_range?.[1] == null
-                          ? null
-                          : [v ?? 0, spec.data.num_samples_range?.[1] ?? 20],
-                    })
-                  }
-                />
-                <span className="text-muted-fg">–</span>
-                <NumberInput
-                  value={spec.data.num_samples_range?.[1] ?? null}
-                  onChange={(v) =>
-                    patchData({
-                      num_samples_range:
-                        v == null && spec.data.num_samples_range?.[0] == null
-                          ? null
-                          : [spec.data.num_samples_range?.[0] ?? 0, v ?? 20],
-                    })
-                  }
-                />
-              </div>
+            <Field label="Aggregate across datasets">
+              <Segmented
+                value={spec.aggregate_datasets}
+                onChange={(v) => patch({ aggregate_datasets: v })}
+                options={[
+                  { value: "none", label: "Off" },
+                  { value: "macro", label: "Mean of datasets" },
+                  { value: "pool", label: "Pooled" },
+                ]}
+              />
             </Field>
+            {spec.chart_type === "bar" ? (
+              <Field label="Sample size (N)" hint="Pick the N to compare across datasets. N=0 = zero-shot models.">
+                <Select value={currentBarN} onChange={setBarN} options={barNOptions} />
+              </Field>
+            ) : (
+              <Field label="Samples range (min / max)">
+                <div className="flex items-center gap-2">
+                  <NumberInput
+                    value={spec.data.num_samples_range?.[0] ?? null}
+                    onChange={(v) =>
+                      patchData({
+                        num_samples_range:
+                          v == null && spec.data.num_samples_range?.[1] == null
+                            ? null
+                            : [v ?? 0, spec.data.num_samples_range?.[1] ?? 20],
+                      })
+                    }
+                  />
+                  <span className="text-muted-fg">–</span>
+                  <NumberInput
+                    value={spec.data.num_samples_range?.[1] ?? null}
+                    onChange={(v) =>
+                      patchData({
+                        num_samples_range:
+                          v == null && spec.data.num_samples_range?.[0] == null
+                            ? null
+                            : [spec.data.num_samples_range?.[0] ?? 0, v ?? 20],
+                      })
+                    }
+                  />
+                </div>
+              </Field>
+            )}
           </Section>
 
           {/* X axis */}
@@ -341,12 +400,39 @@ export default function ChartBuilder() {
             <Field label="Palette (seaborn)">
               <PalettePicker catalog={catalog} value={spec.palette} onChange={(v) => patch({ palette: v })} />
             </Field>
-            {spec.chart_type === "line" && (
-              <Checkbox
-                checked={spec.show_error_band}
-                onChange={(v) => patch({ show_error_band: v })}
-                label="Show ± std error band"
-              />
+            {spec.chart_type !== "scatter" && (
+              <>
+                <Checkbox
+                  checked={spec.show_error_band}
+                  onChange={(v) => patch({ show_error_band: v })}
+                  label={spec.chart_type === "bar" ? "Show error bars" : "Show ± error band"}
+                />
+                {spec.show_error_band && (
+                  <>
+                    <Field label="Error measure">
+                      <Segmented
+                        value={spec.error_type}
+                        onChange={(v) => patch({ error_type: v })}
+                        options={[
+                          { value: "std", label: "Std (±σ)" },
+                          { value: "sem", label: "Std error (±SEM)" },
+                        ]}
+                      />
+                    </Field>
+                    {spec.chart_type === "line" && (
+                      <Field label={`Band opacity (${spec.error_alpha.toFixed(2)})`}>
+                        <Slider
+                          value={spec.error_alpha}
+                          onChange={(v) => patch({ error_alpha: v })}
+                          min={0}
+                          max={1}
+                          step={0.05}
+                        />
+                      </Field>
+                    )}
+                  </>
+                )}
+              </>
             )}
             <Checkbox checked={spec.show_grid} onChange={(v) => patch({ show_grid: v })} label="Show grid" />
             <Field label="Marker size">
@@ -453,14 +539,17 @@ export default function ChartBuilder() {
               </Field>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="default" onClick={doPin}>
-                <Pin className="h-4 w-4" /> Pin to dashboard
+              <Button variant="default" onClick={() => setPinOpen(true)}>
+                <Pin className="h-4 w-4" /> {editItemId ? "Save / pin" : "Pin to dashboard"}
               </Button>
               <Button variant="primary" onClick={doExport}>
                 <Download className="h-4 w-4" /> Export
               </Button>
             </div>
           </div>
+          {editItemId && (
+            <InlineNote>Editing a pinned figure — “Save / pin” can update it in place.</InlineNote>
+          )}
           {msg && <InlineNote tone="success">{msg}</InlineNote>}
           {meta && (
             <InlineNote>
@@ -469,6 +558,14 @@ export default function ChartBuilder() {
           )}
         </div>
       </div>
+
+      <PinDialog
+        open={pinOpen}
+        defaultTitle={pinTitle}
+        editItemId={editItemId}
+        onConfirm={handlePin}
+        onClose={() => setPinOpen(false)}
+      />
     </div>
   );
 }
@@ -503,6 +600,9 @@ function AxisControls({
           <NumberInput value={axis.max} onChange={(v) => onChange({ max: v })} />
         </Field>
       </div>
+      <Field label="Tick step (spacing)" hint="e.g. 2 → ticks at 0, 2, 4, … (blank = auto)">
+        <NumberInput value={axis.tick_step} step={0.5} onChange={(v) => onChange({ tick_step: v })} />
+      </Field>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Label size">
           <NumberInput value={axis.label_fontsize} onChange={(v) => onChange({ label_fontsize: v ?? 14 })} />

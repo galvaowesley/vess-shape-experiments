@@ -1,8 +1,13 @@
 import type {
   DashboardItem,
+  DashboardMeta,
   Metadata,
   PaletteCatalog,
   PlotSpec,
+  StylePrefs,
+  StylePrefsResponse,
+  TableResult,
+  TableSpec,
   TrainingOptions,
   TrainingRequest,
   TrainingStatus,
@@ -53,6 +58,19 @@ export const api = {
     return fetch(`${BASE}/eval/metadata?${q}`).then((r) => jsonOrThrow<Metadata>(r));
   },
   palettes: () => fetch(`${BASE}/eval/palettes`).then((r) => jsonOrThrow<PaletteCatalog>(r)),
+  getStyle: () => fetch(`${BASE}/eval/style`).then((r) => jsonOrThrow<StylePrefsResponse>(r)),
+  saveStyle: (prefs: StylePrefs) =>
+    fetch(`${BASE}/eval/style`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefs),
+    }).then((r) => jsonOrThrow<StylePrefs>(r)),
+  renderTable: (spec: TableSpec) =>
+    fetch(`${BASE}/eval/table`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(spec),
+    }).then((r) => jsonOrThrow<TableResult>(r)),
   renderFigure: (spec: PlotSpec) => renderToBlobUrl("/eval/render", spec),
   exportFigure: (spec: PlotSpec) =>
     fetch(`${BASE}/eval/export`, {
@@ -77,12 +95,39 @@ export const api = {
     }).then((r) => jsonOrThrow<Record<string, unknown>>(r)),
 
   // --- dashboard ---
-  listDashboard: () => fetch(`${BASE}/dashboard`).then((r) => jsonOrThrow<DashboardItem[]>(r)),
+  listDashboards: () =>
+    fetch(`${BASE}/dashboard/dashboards`).then((r) => jsonOrThrow<DashboardMeta[]>(r)),
+  createDashboard: (name: string) =>
+    fetch(`${BASE}/dashboard/dashboards`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => jsonOrThrow<DashboardMeta>(r)),
+  renameDashboard: (id: string, name: string) =>
+    fetch(`${BASE}/dashboard/dashboards/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => jsonOrThrow<DashboardMeta>(r)),
+  deleteDashboard: (id: string) =>
+    fetch(`${BASE}/dashboard/dashboards/${id}`, { method: "DELETE" }).then((r) =>
+      jsonOrThrow<Record<string, unknown>>(r),
+    ),
+  listDashboard: (dashboardId?: string) => {
+    const q = dashboardId ? `?dashboard_id=${encodeURIComponent(dashboardId)}` : "";
+    return fetch(`${BASE}/dashboard${q}`).then((r) => jsonOrThrow<DashboardItem[]>(r));
+  },
   pin: (item: DashboardItem) =>
     fetch(`${BASE}/dashboard`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(item),
+    }).then((r) => jsonOrThrow<DashboardItem>(r)),
+  updatePin: (id: string, patch: Partial<DashboardItem>) =>
+    fetch(`${BASE}/dashboard/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
     }).then((r) => jsonOrThrow<DashboardItem>(r)),
   unpin: (id: string) =>
     fetch(`${BASE}/dashboard/${id}`, { method: "DELETE" }).then((r) =>
@@ -94,11 +139,11 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order }),
     }).then((r) => jsonOrThrow<DashboardItem[]>(r)),
-  exportDashboard: (out_dir: string, format: string, dpi: number) =>
+  exportDashboard: (out_dir: string, format: string, dpi: number, dashboard_id?: string) =>
     fetch(`${BASE}/dashboard/export`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ out_dir, format, dpi }),
+      body: JSON.stringify({ out_dir, format, dpi, dashboard_id }),
     }).then((r) => jsonOrThrow<Record<string, unknown>>(r)),
 
   // --- training ---
@@ -128,6 +173,9 @@ export const api = {
     ),
   trainingStatus: () =>
     fetch(`${BASE}/training/status`).then((r) => jsonOrThrow<TrainingStatus>(r)),
+
+  /** Generic GET helper for new endpoints (monitor panel). */
+  get: <T>(path: string) => fetch(path).then((r) => jsonOrThrow<T>(r)),
 };
 
 export function trainingLogSocket(): WebSocket {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Download, Pin } from "lucide-react";
 import { api } from "../lib/api";
 import type { Metadata, WilcoxonSpec } from "../lib/types";
-import { defaultWilcoxonSpec } from "../lib/plotSpec";
+import { defaultWilcoxonSpec, hydrateWilcoxonSpec } from "../lib/plotSpec";
 import { useDebounced, useObjectUrl } from "../lib/util";
 import {
   Button,
@@ -17,6 +18,7 @@ import {
   TextInput,
 } from "../components/ui";
 import { ColorWheel } from "../components/ColorWheel";
+import { PinDialog, type PinResult } from "../components/PinDialog";
 import { PageHeader, PreviewPane, InlineNote } from "../components/common";
 
 const ALL_DATASETS = ["dca1", "drive", "octa2d", "vessmap"];
@@ -28,12 +30,28 @@ export default function Significance() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [editItemId, setEditItemId] = useState<string | null>(null);
+
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useObjectUrl(url);
   const debounced = useDebounced(spec, 300);
 
   useEffect(() => {
     api.metadata("per_run", ALL_DATASETS).then(setMeta).catch(() => undefined);
+  }, []);
+
+  // Re-open a pinned Wilcoxon figure for editing (navigated from the Dashboard).
+  useEffect(() => {
+    const st = location.state as { editSpec?: Record<string, unknown>; editItemId?: string } | null;
+    if (st?.editSpec) {
+      setSpec(hydrateWilcoxonSpec(st.editSpec));
+      setEditItemId(st.editItemId ?? null);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -78,15 +96,24 @@ export default function Significance() {
     }
   }
 
-  async function doPin() {
-    setMsg(null);
-    await api.pin({
-      title: spec.title.text || `Wilcoxon · ${spec.reference_model} · ${spec.metric}`,
-      kind: "wilcoxon",
+  const pinTitle = spec.title.text || `Wilcoxon · ${spec.reference_model} · ${spec.metric}`;
+
+  async function handlePin({ dashboardId, title, mode }: PinResult) {
+    const payload = {
+      title,
+      kind: "wilcoxon" as const,
       regime: spec.n_values.includes(0) ? "Zero-shot" : null,
+      dashboard_id: dashboardId,
       spec: spec as unknown as Record<string, unknown>,
-    });
-    setMsg("Pinned to dashboard.");
+    };
+    if (mode === "update" && editItemId) {
+      await api.updatePin(editItemId, payload);
+      setMsg("Updated pinned figure.");
+    } else {
+      const created = await api.pin(payload);
+      setEditItemId(created.id ?? null);
+      setMsg("Pinned to dashboard.");
+    }
   }
 
   return (
@@ -236,17 +263,28 @@ export default function Significance() {
               </Field>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="default" onClick={doPin}>
-                <Pin className="h-4 w-4" /> Pin to dashboard
+              <Button variant="default" onClick={() => setPinOpen(true)}>
+                <Pin className="h-4 w-4" /> {editItemId ? "Save / pin" : "Pin to dashboard"}
               </Button>
               <Button variant="primary" onClick={exportWilcoxon}>
                 <Download className="h-4 w-4" /> Export
               </Button>
             </div>
           </div>
+          {editItemId && (
+            <InlineNote>Editing a pinned figure — “Save / pin” can update it in place.</InlineNote>
+          )}
           {msg && <InlineNote tone="success">{msg}</InlineNote>}
         </div>
       </div>
+
+      <PinDialog
+        open={pinOpen}
+        defaultTitle={pinTitle}
+        editItemId={editItemId}
+        onConfirm={handlePin}
+        onClose={() => setPinOpen(false)}
+      />
     </div>
   );
 }
