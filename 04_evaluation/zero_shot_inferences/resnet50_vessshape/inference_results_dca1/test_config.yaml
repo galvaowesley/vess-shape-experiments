@@ -1,0 +1,25 @@
+benchmark: false
+channels: null
+checkpoint_type: last
+dataset_class: dca1
+dataset_params: {}
+dataset_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/DCA1
+deterministic: false
+device: cuda:0
+encoder_weights: null
+force_headless: true
+imagenet_normalize: false
+inference_dir_name: /tmp/vss_zero_shot_raw/resnet50_vessshape/inference_results_dca1
+model_class: resnet50_unet
+model_params: {}
+resize_size:
+- 288
+- 288
+run_path: /media/wesleygalvao/1_TB_LINUX/models_results/01_pre-trained_on_vess_shape/resnet50_ts:50k_bs-train:96_ep:3000_lr:0.001_lr-decay:0.0_wd:0.0001_opt:adam_class1:0.10_FP16
+save_inference_images: false
+seed: 0
+skip_boxplot: true
+skip_checkpoint_loading: false
+threshold: 0.5
+tta_type: none
+use_amp: true
