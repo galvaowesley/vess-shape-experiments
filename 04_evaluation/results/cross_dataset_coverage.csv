@@ -1,0 +1,13 @@
+model_type,stage,dca1,drive,octa2d,vessmap
+IN-UNet18,finetune,165.0,135.0,165.0,165.0
+IN-UNet50,finetune,165.0,135.0,164.0,165.0
+LiteMedSAM-FT,finetune,165.0,135.0,164.0,165.0
+UNet18,scratch,82.0,45.0,165.0,135.0
+UNet50,scratch,90.0,31.0,165.0,143.0
+VSUNet18,finetune,165.0,135.0,165.0,165.0
+VSUNet50,finetune,165.0,135.0,165.0,164.0
+Zero-Shot IN-UNet18,zero_shot,1.0,1.0,1.0,1.0
+Zero-Shot IN-UNet50,zero_shot,1.0,1.0,1.0,1.0
+Zero-Shot LiteMedSAM,zero_shot,1.0,1.0,1.0,1.0
+Zero-Shot VSUNet18,zero_shot,1.0,1.0,1.0,1.0
+Zero-Shot VSUNet50,zero_shot,1.0,1.0,1.0,1.0

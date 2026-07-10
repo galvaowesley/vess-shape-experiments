@@ -1,0 +1,6 @@
+run_name,num_samples,run,rep,wandb_group,model_class,Accuracy,IoU,Precision,Recall,Dice,AUC,model_type,stage,experiment,is_mock,weights
+zero_shot_resnet18_vessshape,0,,,vessshape,resnet18_unet,0.9130190525736128,0.3748958933921087,0.4008861077683313,0.91732367731276,0.5358159045378367,0.9707416010552916,Zero-Shot VSUNet18,zero_shot,__zero_shot_csv__,False,vessshape
+zero_shot_resnet50_vessshape,0,,,vessshape,resnet50_unet,0.929199993610382,0.3321637165333543,0.4273222159771692,0.7071964618794265,0.4799489846364373,0.9259895673005978,Zero-Shot VSUNet50,zero_shot,__zero_shot_csv__,False,vessshape
+zero_shot_resnet18_imagenet,0,,,imagenet,resnet18_unet,0.795594178494953,0.0286672885884486,0.0367710259964778,0.130748290302498,0.0551611526115309,0.4053696672682546,Zero-Shot IN-UNet18,zero_shot,__zero_shot_csv__,False,imagenet
+zero_shot_resnet50_imagenet,0,,,imagenet,resnet50_unet,0.0623142854088828,0.0481229334005287,0.0481275772409779,0.9979779152643112,0.0916257915752274,0.5459068307688059,Zero-Shot IN-UNet50,zero_shot,__zero_shot_csv__,False,imagenet
+zero_shot_litemedsam,0,,,litemedsam,litemedsam,0.9517195820808412,0.0045038159102356,0.1704932436834843,0.0046619308330783,0.0088859522310529,0.6959288669859421,Zero-Shot LiteMedSAM,zero_shot,__zero_shot_csv__,False,litemedsam
