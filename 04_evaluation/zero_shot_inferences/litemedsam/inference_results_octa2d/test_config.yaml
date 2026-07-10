@@ -1,0 +1,25 @@
+benchmark: false
+channels: rgb
+checkpoint_type: best
+dataset_class: octa2d
+dataset_params: {}
+dataset_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/OCTA2D
+deterministic: false
+device: cuda:0
+encoder_weights: null
+force_headless: true
+imagenet_normalize: false
+inference_dir_name: /tmp/vss_zero_shot_raw/litemedsam/inference_results_octa2d
+model_class: litemedsam
+model_params: {}
+resize_size:
+- 256
+- 256
+run_path: .
+save_inference_images: false
+seed: 0
+skip_boxplot: true
+skip_checkpoint_loading: true
+threshold: 0.5
+tta_type: none
+use_amp: true

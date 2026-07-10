@@ -1,0 +1,21 @@
+# Paleta padronizada model_type -> cor matplotlib para todos os plots de avaliacao.
+# Carregada por utils_eval.load_model_palette() e passada via color_map_override
+# para plot_mean_dice_score, plot_crossdataset_bar e plot_sig_heatmap.
+# Edite aqui para mudar cores em todas as figuras do paper de uma so vez.
+
+# --- Few-shot (treino com rotulos) ---
+UNet18:        '#7f7f7f'   # gray
+UNet50:        '#bcbd22'   # olive
+VSUNet18:      'tab:blue'
+VSUNet50:      'tab:orange'
+IN-UNet18:     '#2ca02c'   # green
+IN-UNet50:     '#d62728'   # red
+LiteMedSAM-FT: '#9467bd'   # purple
+
+# --- Zero-shot (mesmo tom dos pares fine-tuned, para leitura facil cross-regime) ---
+Zero-Shot VSUNet18:      'tab:blue'
+Zero-Shot VSUNet50:      'tab:orange'
+Zero-Shot IN-UNet18:     '#2ca02c'
+Zero-Shot IN-UNet50:     '#d62728'
+Zero-Shot LiteMedSAM:    '#9467bd'
+Zero-Shot LiteMedSAM+IN: '#e377c2'   # pink (variante normalizada do mesmo modelo)

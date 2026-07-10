@@ -16,10 +16,11 @@ from torchvision.transforms.v2 import functional as tv_transf_F
 class TrainTransforms:
     """Lightweight training transform for vessel datasets."""
 
-    def __init__(self, resize_size, resize_target = True):
+    def __init__(self, resize_size, resize_target = True, squeeze_target = True):
 
         self.resize_size = resize_size
         self.resize_target = resize_target
+        self.squeeze_target = squeeze_target
 
         scale = tv_transf.RandomAffine(degrees=0, scale=(0.95, 1.20))
         transl = tv_transf.RandomAffine(degrees=0, translate=(0.05, 0))
@@ -54,16 +55,22 @@ class TrainTransforms:
         img, target = self.transform(img, target)
 
         img = img.data.float()/255
-        target = target.data.to(dtype=torch.int64)[0]
+        if self.squeeze_target:
+            # Class indices [H, W] for cross_entropy
+            target = target.data.to(dtype=torch.int64)[0]
+        else:
+            # Keep channel dim [1, H, W] as float for losses like BCE
+            target = target.data.to(dtype=torch.float32)
 
         return img, target
 
 class ValidTransforms:
     """Validation transform that only resizes the image."""
 
-    def __init__(self, resize_size = None, resize_target = True):
+    def __init__(self, resize_size = None, resize_target = True, squeeze_target = True):
         self.resize_size = resize_size
         self.resize_target = resize_target
+        self.squeeze_target = squeeze_target
 
     def __call__(self, img, target):
 
@@ -78,7 +85,12 @@ class ValidTransforms:
                                             interpolation=tv_transf.InterpolationMode.NEAREST_EXACT)
 
         img = img.float()/255
-        target = target.to(dtype=torch.int64)[0]
+        if self.squeeze_target:
+            # Class indices [H, W] for cross_entropy
+            target = target.to(dtype=torch.int64)[0]
+        else:
+            # Keep channel dim [1, H, W] as float for losses like BCE
+            target = target.to(dtype=torch.float32)
 
         return img, target
 
@@ -87,7 +99,8 @@ def get_dataset_vessmap_train(
         dataset_path, 
         split_strategy, 
         channels='all',
-        resize_size=(512, 512), 
+        resize_size=(512, 512),
+        squeeze_target=True,
         ):
     """Get the VessMAP dataset for training.
 
@@ -131,8 +144,8 @@ def get_dataset_vessmap_train(
     ds_train = VessMAP(dataset_path, channels=channels, keepdim=True, files=train_images)
     ds_valid = VessMAP(dataset_path, channels=channels, keepdim=True, files=valid_images)
         
-    ds_train.transforms = TrainTransforms(resize_size)
-    ds_valid.transforms = ValidTransforms(resize_size)
+    ds_train.transforms = TrainTransforms(resize_size, squeeze_target=squeeze_target)
+    ds_valid.transforms = ValidTransforms(resize_size, squeeze_target=squeeze_target)
 
     return ds_train, ds_valid, class_weights, ignore_index, collate_fn
 
@@ -140,7 +153,8 @@ def get_dataset_vessmap_train(
 def get_dataset_drive_train(
         dataset_path, 
         split_strategy, 
-        resize_size=(256, 256), 
+        resize_size=(256, 256),
+        squeeze_target=True,
         ):
     """Get the DRIVE dataset for training.
 
@@ -183,15 +197,16 @@ def get_dataset_drive_train(
     ds_train = DRIVE(dataset_path, keepdim=True, files=train_images, channels="gray")
     ds_valid = DRIVE(dataset_path, keepdim=True, files=valid_images, channels="gray")
         
-    ds_train.transforms = TrainTransforms(resize_size)
-    ds_valid.transforms = ValidTransforms(resize_size)
+    ds_train.transforms = TrainTransforms(resize_size, squeeze_target=squeeze_target)
+    ds_valid.transforms = ValidTransforms(resize_size, squeeze_target=squeeze_target)
 
     return ds_train, ds_valid, class_weights, ignore_index, collate_fn
 
 def get_dataset_dca1_train(
         dataset_path, 
         split_strategy, 
-        resize_size=(288, 288), 
+        resize_size=(288, 288),
+        squeeze_target=True,
         ):
     """Get the DCA1 dataset for training.
 
@@ -233,15 +248,16 @@ def get_dataset_dca1_train(
     ds_train = DCA1(dataset_path, keepdim=True, files=train_images, channels="gray")
     ds_valid = DCA1(dataset_path, keepdim=True, files=valid_images, channels="gray")
         
-    ds_train.transforms = TrainTransforms(resize_size)
-    ds_valid.transforms = ValidTransforms(resize_size)
+    ds_train.transforms = TrainTransforms(resize_size, squeeze_target=squeeze_target)
+    ds_valid.transforms = ValidTransforms(resize_size, squeeze_target=squeeze_target)
 
     return ds_train, ds_valid, class_weights, ignore_index, collate_fn
 
 def get_dataset_octa2d_train(
         dataset_path, 
         split_strategy, 
-        resize_size=(384, 384), 
+        resize_size=(384, 384),
+        squeeze_target=True,
         ):
     """Get the OCTA2D dataset for training.
 
@@ -284,7 +300,7 @@ def get_dataset_octa2d_train(
     ds_train = OCTA2D(dataset_path, keepdim=True, files=train_images, channels="gray")
     ds_valid = OCTA2D(dataset_path, keepdim=True, files=valid_images, channels="gray")
         
-    ds_train.transforms = TrainTransforms(resize_size)
-    ds_valid.transforms = ValidTransforms(resize_size)
+    ds_train.transforms = TrainTransforms(resize_size, squeeze_target=squeeze_target)
+    ds_valid.transforms = ValidTransforms(resize_size, squeeze_target=squeeze_target)
 
     return ds_train, ds_valid, class_weights, ignore_index, collate_fn

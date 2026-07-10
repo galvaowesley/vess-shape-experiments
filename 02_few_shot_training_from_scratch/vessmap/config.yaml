@@ -1,7 +1,6 @@
 # Section of training parameters
 train_params:
-  #experiment_name: multi_train_scratch_on_vessmap_resnet18
-  experiment_name: multi_train_scratch_on_vessmap_resnet50
+  experiment_name: multi_train_scratch_vessmap_unet18_lr_e-2
   run_name: ''
   validate_every: 5
   save_val_imgs: ''
@@ -10,22 +9,20 @@ train_params:
   dataset_class: vessmap_few
   split_strategy: ''
   resize_size: '256 256'
-  #model_class: resnet18_unet
-  model_class: resnet50_unet
-  num_epochs: 1000
+  model_class: resnet18_unet
+  num_epochs: 500
   validation_metric: Dice
   maximize_validation_metric: ''
   bs_train: 8
   bs_valid: 20
   weight_decay: 0.0
-  lr: 0.001
+  lr: 1e-2
   lr_decay: 1.0
   # ignore_class_weights: '' # Ignore class weights during training
   optimizer: adam
   num_workers: 12
   log_wandb: ''
-  #wandb_project: multi_train_scratch_on_vessmap_resnet18
-  wandb_project: multi_train_scratch_on_vessmap_resnet50
+  wandb_project: multi_train_scratch_vessmap_unet18_lr_e-2
   wandb_group: ''
   #suppress_checkpoint: '' # Suppress checkpoint saving, if enabled
   suppress_best_checkpoint: '' # Suppress best checkpoint saving, if enabled
@@ -42,16 +39,13 @@ experiment_params:
   step: 2
   csv_path: /media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP/train.csv
   weights_id: FromScratch
-  # (inference orchestration flags moved to test_params)
-  
 
 # Section of parameters for test/inference
 test_params:
   run_path: ""
   dataset_path: "/media/wesleygalvao/1_TB_LINUX/Datasets/blood_vessels/VessMAP"
   dataset_class: vessmap
-  #model_class: resnet18_unet
-  model_class: resnet50_unet
+  model_class: resnet18_unet
   use_amp: ""
   save_inference_images: ""
   checkpoint_type: "last"
@@ -65,4 +59,3 @@ test_params:
   max_inference_retries: 1  # Number of retry attempts for failed inference runs
   delete_only_on_success: True  # Only delete checkpoint if inference succeeded
   aggregate_inference_means: True  # Append mean metrics to aggregated CSV
-  

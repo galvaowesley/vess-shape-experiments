@@ -2,7 +2,7 @@
 
 Experiments and analysis for a master’s thesis on few-shot blood vessel segmentation. The core idea is to instill a strong shape bias in segmentation models via synthetic pre-training (VessShape), and then measure transfer to real datasets (DRIVE, VessMAP) with very few labeled samples.
 
-This repo is organized into four stages: (1) pre-training, (2) few‑shot training from scratch, (3) few‑shot fine‑tuning of pre-trained weights, and (4) evaluation. Reusable utilities live in `src/`.
+This repo is organized into four stages: (1) pre-training, (2) few‑shot training from scratch, (3) few‑shot fine‑tuning of pre-trained weights, and (4) evaluation. Reusable utilities live in `src/`. A local **web app** (`05_webapp/`) consolidates training (stages 02 & 03) and the generation of publication-quality evaluation figures — see [Web App](#web-app-training--evaluation-ui).
 
 ## Purpose (What this project aims to show)
 
@@ -81,8 +81,15 @@ If you plan to use notebooks and plots interactively, also install Jupyter/Plotl
 │   │   ├── config_litemedsam.yaml        #   LiteMedSAM fine-tuning
 │   │   └── experiments/                  #   Auto-generated outputs
 ├── 04_evaluation/
-│   ├── models_evalation.ipynb         # Aggregation/plots (Dice vs. samples, etc.)
-│   └── utils.py                       # Plotting/helpers
+│   ├── eval_master_cross_dataset.ipynb # Cross-dataset aggregation, bars, Wilcoxon
+│   ├── eval_{vessmap,drive,dca1,octa2d}.ipynb
+│   ├── utils.py / utils_eval.py        # Plotting / loaders / stats helpers
+│   ├── model_colors.yaml               # Shared model→color palette
+│   └── results/  figures/  zero_shot/  # Consolidated CSVs and figures
+├── 05_webapp/                          # Local training + evaluation web app
+│   ├── backend/                        # FastAPI (rendering, stats, dashboard, training jobs)
+│   ├── frontend/                       # React + Vite + TypeScript + Tailwind control panel
+│   └── README.md                       # Setup & usage
 ├── src/
 │   ├── dataset.py                     # Dataset builders / parsing
 │   ├── static_vess_shape_dataset.py   # Static dataset utilities
@@ -140,8 +147,45 @@ python run_serial_fine-tuning.py --dataset drive --config_file config_litemedsam
 
 1) Evaluation & plots
 
-- Open `04_evaluation/models_evalation.ipynb` to aggregate results and draw figures.
-- Reusable helpers in `04_evaluation/utils.py` (matplotlib/plotly curves, zero-shot annotations, etc.).
+- Open the `04_evaluation/eval_*.ipynb` notebooks to aggregate results and draw figures.
+- Reusable helpers in `04_evaluation/utils.py` and `utils_eval.py` (matplotlib curves, grouped
+  bars, Wilcoxon heatmaps, zero-shot annotations, etc.).
+- Or use the **web app** (below) for interactive, publication-quality figure generation.
+
+## Web App (training & evaluation UI)
+
+`05_webapp/` is a local React + FastAPI control panel that consolidates training and evaluation
+without editing notebooks or YAML by hand. It is **additive** — it imports/reads `src/*`,
+`04_evaluation/utils_eval.py`, the launchers, and the result CSVs, and never modifies them.
+
+Capabilities:
+
+- **Chart Builder** — line / bar / scatter figures rendered with matplotlib on the backend
+  (live preview equals the exported file). Full control over data, shot-regime
+  (Zero-/One-/Few-shot) filtering & faceting, axes (fields, min/max, labels, sizes, rotation),
+  titles, fonts, **seaborn palettes + a Photoshop-style color wheel**, per-series style, legend,
+  and **export to SVG / PNG / JPG / PDF**.
+- **Significance** — flexible **Wilcoxon signed-rank** grid (alpha, alternative, comparisons,
+  datasets, per-N panels) reusing `utils_eval`/`scipy`.
+- **Dashboard** — pin figures and compare them side-by-side, grouped by shot-regime; export all.
+- **Training** — configure & launch stages **02 / 03** (dataset, model, pretraining,
+  hyperparameters, few-shot loop), preview the exact YAML, **Save config** or **Save & Run**
+  with a live log console. Stage **01** is a "Coming soon" placeholder.
+
+Run it:
+
+```bash
+# backend (port 8000) — uses the `base` conda env (fastapi + eval deps);
+# training jobs are launched with the `mestrado_env` interpreter automatically.
+cd 05_webapp/backend
+conda run -n base python -m uvicorn app.main:app --reload --port 8000
+
+# frontend (port 5173) — proxies /api to the backend
+cd 05_webapp/frontend
+npm install && npm run dev   # open http://localhost:5173
+```
+
+See `05_webapp/README.md` for details, the environment matrix, and the full API surface.
 
 ## Config files: parameters (stages 02 & 03)
 
