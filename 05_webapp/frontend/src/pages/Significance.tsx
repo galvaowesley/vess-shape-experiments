@@ -96,6 +96,9 @@ export default function Significance() {
     }
   }
 
+  // Standard title, kept in sync with the backend's format (stats.py).
+  const defaultTitle = `Wilcoxon: ${spec.reference_model} ${spec.alternative} others — ${spec.metric} (α=${spec.alpha})`;
+
   const pinTitle = spec.title.text || `Wilcoxon · ${spec.reference_model} · ${spec.metric}`;
 
   async function handlePin({ dashboardId, title, mode }: PinResult) {
@@ -218,8 +221,13 @@ export default function Significance() {
           </Section>
 
           <Section title="Title & figure" defaultOpen={false}>
-            <Field label="Title (blank = auto)">
-              <TextInput value={spec.title.text} onChange={(e) => setSpec((s) => ({ ...s, title: { ...s.title, text: e.target.value } }))} />
+            <Field label="Title (blank = no title)">
+              <div className="flex items-center gap-2">
+                <TextInput value={spec.title.text} onChange={(e) => setSpec((s) => ({ ...s, title: { ...s.title, text: e.target.value } }))} />
+                <Button variant="ghost" onClick={() => setSpec((s) => ({ ...s, title: { ...s.title, text: defaultTitle } }))}>
+                  Default title
+                </Button>
+              </div>
             </Field>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Base font">

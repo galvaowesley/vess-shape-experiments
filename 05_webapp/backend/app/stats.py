@@ -153,11 +153,12 @@ def render_wilcoxon(spec: WilcoxonSpec) -> tuple[bytes, str]:
                                 color="white" if p < spec.alpha else "#1e293b",
                                 fontsize=base - 2)
 
-        title = spec.title.text or (
-            f"Wilcoxon: {spec.reference_model} {spec.alternative} others — {spec.metric} "
-            f"(α={spec.alpha})")
-        fig.suptitle(title, fontsize=spec.title.fontsize)
-        fig.tight_layout(rect=(0, 0, 1, 0.96))
+        title = spec.title.text.strip() if spec.title.text else ""
+        if title:
+            fig.suptitle(title, fontsize=spec.title.fontsize)
+            fig.tight_layout(rect=(0, 0, 1, 0.96))
+        else:
+            fig.tight_layout()
 
         fmt = spec.export.format
         save_fmt = "jpeg" if fmt == "jpg" else fmt
