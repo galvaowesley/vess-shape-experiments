@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FlaskConical,
+  Images,
   LayoutGrid,
   Microscope,
   Moon,
@@ -22,6 +23,7 @@ import Training from "./pages/Training";
 import Pretraining from "./pages/Pretraining";
 import Appearance from "./pages/Appearance";
 import Tables from "./pages/Tables";
+import FigureStudio from "./pages/FigureStudio";
 
 const NAV = [
   { to: "/pretraining", label: "Pretraining", icon: Rocket },
@@ -29,6 +31,7 @@ const NAV = [
   { to: "/charts", label: "Chart Builder", icon: BarChart3 },
   { to: "/tables", label: "Tables", icon: Table2 },
   { to: "/significance", label: "Significance", icon: Sigma },
+  { to: "/figures", label: "Figure Studio", icon: Images },
   { to: "/dashboard", label: "Dashboard", icon: LayoutGrid },
   { to: "/appearance", label: "Appearance", icon: Palette },
 ];
@@ -166,6 +169,7 @@ export default function App() {
           <Route path="/charts" element={<ChartBuilder />} />
           <Route path="/tables" element={<Tables />} />
           <Route path="/significance" element={<Significance />} />
+          <Route path="/figures" element={<FigureStudio />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/appearance" element={<Appearance />} />
           <Route path="*" element={<Navigate to={lastRoute()} replace />} />

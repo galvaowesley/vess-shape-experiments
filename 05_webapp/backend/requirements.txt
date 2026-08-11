@@ -3,3 +3,7 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
 python-multipart>=0.0.9
+# Figure Studio: converts TIFF/BMP/GIF panels to browser-displayable PNG.
+Pillow>=10
+# Imported by app/system_metrics.py (was missing, breaking the training router).
+psutil>=5.9
