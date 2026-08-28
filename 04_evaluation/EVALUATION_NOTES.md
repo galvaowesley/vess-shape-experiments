@@ -5,7 +5,7 @@
 > possa ser retomado em qualquer sessão. **Atualize a seção "Histórico de mudanças"
 > sempre que algo for alterado.**
 
-Última atualização: 2026-05-22
+Última atualização: 2026-05-29 (fase 4 — multi-métrica + paleta YAML)
 
 ---
 
@@ -87,6 +87,7 @@ Convenções: `VS`=VessShape, `IN-`=ImageNet, `-FT`=fine-tuned, `+IN`=normaliza�
 | `eval_octa2d.ipynb`              | Avaliação OCTA2D (zero-shot mock) |
 | `eval_master_cross_dataset.ipynb`| Comparações cross-dataset + tabelas/figuras agregadas |
 | `run_zero_shot_inference.ipynb`  | **Gera** o zero-shot real (5 variantes × 4 datasets) e consolida os CSVs |
+| `model_colors.yaml`              | Paleta padronizada `model_type → cor` para consistência cross-figure (paper) |
 
 Arquivos legados (intocados): `utils.py`, `models_evalation.ipynb`, `inference_zero_shot.ipynb`
 (este último substituído por `run_zero_shot_inference.ipynb`).
@@ -151,7 +152,61 @@ zero_shot_inferences/<variant_key>/inference_results_<ds>/{metrics.csv, metrics_
 - `save_result_matrices(df, dataset, out_dir=RESULTS_DIR, suffix='')` → escreve few/zero/all matrices.
 - `generate_mock_zero_shot(dataset, model_classes=('resnet18_unet','resnet50_unet'), placeholder=nan)`.
 - `default_line_styles_7way()` → dict de line styles explícito (cobre VSUNet/IN-UNet/LiteMedSAM zero-shot).
+- `load_model_palette(yaml_path=None, warn_missing=None)` → `dict[model_type → cor]` carregado
+  de `model_colors.yaml` (default `<module_dir>/model_colors.yaml`). Retorna `None` se o arquivo
+  não existir. Passado como `color_map_override` em `plot_mean_dice_score`, `plot_crossdataset_bar`
+  e (futuras) plot helpers para cores consistentes cross-figure. `warn_missing` emite warning
+  listando labels esperados ausentes.
 - `report_coverage(df)` → contagem/min/max de `num_samples` por `(model_type, stage)`.
+
+### Cross-dataset bar charts & Wilcoxon helpers (`utils_eval.py`, fase 4)
+
+Movidos para `utils_eval.py` para que o `eval_master_cross_dataset.ipynb` contenha
+apenas orquestração (loops sobre métricas + I/O). Todos os `plot_*` fazem **imports
+preguiçosos** de matplotlib/scipy para não inflar o cold load de `utils_eval`.
+
+- `load_per_image_dict(datasets=DATASETS_ORDER, results_dir=RESULTS_DIR)` → `dict[ds → DataFrame]`,
+  lê `results/<ds>_all_results_per_image.csv`.
+- `compute_bar_sig_pvalues(pivot, per_image, n_samples=1, metric='Dice', fine_tuned_to_zeroshot=None, min_common_images=5)`
+  → `dict[ft_model → dict[dataset → p_value]]`. Wilcoxon one-sided (fine-tuned@N > zero-shot par)
+  por modelo × dataset. Param `metric` permite reuso em qualquer das 6 métricas.
+- `compute_pairwise_sig_matrix(model_a, model_b, per_image, metric='Dice', datasets_order=None, fine_tuned_to_zeroshot=None, min_common_images=5)`
+  → `DataFrame(rows=datasets, cols=N)`. Wilcoxon H: Metric(model_a) > Metric(model_b);
+  N=0 via `FINE_TUNED_TO_ZEROSHOT`, N≥1 via few-shot.
+- `plot_crossdataset_bar(pivot, title='', ylabel='', xlabel='Dataset', save_path=None,
+  y_limits=None, ymin=None, ymax=None, sig_pvalues=None, alpha=ALPHA, color_map_override=None,
+  palette=None, percentage=False, font_sizes=None, figsize=(12,5.5), rotation=0,
+  legend_loc='upper left', legend_bbox=(1.01,1), legend_title='Model', datasets_order=None, dpi=150)`
+  → barras agrupadas com **datasets no eixo x** e **cores = modelo**. Aceita `color_map_override`
+  (YAML), `percentage` (×100 + `%` no eixo) e `font_sizes` dict
+  (`{title, xlabel, ylabel, xaxis, yaxis, legend, sig_marker}`). `y_limits` tem prioridade
+  sobre `ymin`/`ymax`.
+- `plot_sig_heatmap(p_matrix, title='', save_path=None, alpha=ALPHA, xlabel='# Samples',
+  ylabel='Dataset', font_sizes=None, figsize=None, dpi=150)` → heatmap binário: cinza+X
+  vermelho = NaN, azul claro = não-sig, azul escuro = sig. `font_sizes` dict consolidado
+  (`{title, xlabel, ylabel, xaxis, yaxis}`). Sem anotações numéricas.
+
+Constantes exportadas: `ALPHA=0.05`, `DATASETS_ORDER=['dca1','drive','octa2d','vessmap']`,
+`FINE_TUNED_TO_ZEROSHOT` (mapa FT→ZS, 5 entradas), `VSUPAIR_COMPARISONS` (4 pares VSUNet vs.
+alternativo para o loop §8).
+
+Constantes/objetos locais ao master notebook (cell de imports/loader):
+`PALETTE = load_model_palette()`, `PRETTY` (dataset → label legível para títulos),
+`per_image = load_per_image_dict()` (lazy load das matrizes por imagem).
+Todas as constantes globais (`ALPHA`, `DATASETS_ORDER`, `FINE_TUNED_TO_ZEROSHOT`,
+`VSUPAIR_COMPARISONS`) e as funções de plot moram em `utils_eval.py` — ver seção
+"Cross-dataset bar charts & Wilcoxon helpers" mais abaixo.
+
+### Paleta padronizada — `model_colors.yaml`
+
+Mapa autoritativo `model_type → cor matplotlib` (hex ou named). É carregado em **todos** os
+notebooks `eval_*.ipynb` e no master via `PALETTE = load_model_palette()` e passado como
+`color_map_override` em cada chamada de plot. Garante que VSUNet18, IN-UNet50, etc. têm a
+**mesma cor em todas as figuras** do paper.
+
+Editar este arquivo recolore todas as figuras na próxima execução — não há cor hardcoded
+no código (o antigo override VSUNet18=azul / VSUNet50=laranja em `utils.plot_mean_dice_score`
+foi removido na fase 4 e migrou para o YAML).
 
 Constantes: `DATASETS`, `STAGES`, `DEFAULT_IGNORE_DIRS`, `METRICS`, `DEFAULT_LABEL_MAP`, `ZERO_SHOT_LABEL`,
 `ZERO_SHOT_VARIANTS` (registry variant_key → {model_class, weights, model_type}).
@@ -186,6 +241,12 @@ Dice zero-shot observado (referência — fase 3):
 
 ## 10. Pendências / TODO
 
+- [x] **2026-05-29** — Multi-métrica + paleta YAML + controle estético uniforme:
+      `model_colors.yaml` criado; `load_model_palette` em `utils_eval.py`; `plot_mean_dice_score`
+      ganhou `color_map_override` (override hardcoded VSUNet removido); `plot_crossdataset_bar`
+      e `plot_sig_heatmap` reescritas com assinaturas completas (font_sizes, percentage, dpi,
+      legend_loc, color_map_override, metric param); todos os notebooks (`eval_*`, master) com
+      loop sobre as 6 métricas em §4/§5 (eval_*) e §4/§6/§7/§8 (master). SVGs nomeados por métrica.
 - [ ] Rodar `litemedsam_normalized` (fase 4) nos 4 datasets e re-executar `eval_*.ipynb`;
       confirmar que LiteMedSAM+IN Dice > 0 (valida H1) ou documentar como limitação.
 - [ ] Rodar inferência **from-scratch** do DRIVE (`multi_train_scratch_drive_*`) para
@@ -195,6 +256,10 @@ Dice zero-shot observado (referência — fase 3):
       só conhece resnet/unet/vsunet).
 - [ ] (Opcional) Suporte a `ax=` no `plot_mean_dice_score` para painéis multi-dataset
       numa única figura (hoje gera 1 figura por dataset).
+- [x] **2026-05-29** — Gráficos de barra cross-dataset redesenhados: datasets no eixo x,
+      cores = modelo, paleta `muted`, significância Wilcoxon sobre barras few-shot, parâmetros
+      `ymin`/`ymax`. Wilcoxon §8 reformulado: hipótese VSUNet > IN-UNet / LiteMedSAM-FT,
+      inclui N=0, sem anotações numéricas, X vermelho para NaN, figuras separadas por par.
 
 ## 10.1. Riscos / pontos abertos
 
@@ -213,6 +278,36 @@ Dice zero-shot observado (referência — fase 3):
   embedding é idêntico em zero-shot e few-shot; a diferença vem do encoder/decoder adaptados.
 
 ## 11. Histórico de mudanças
+
+- **2026-05-29 (fase 4 — multi-métrica, paleta YAML e modularização)**
+  Refatoração ampla do pipeline de plots para o paper:
+  - **Multi-métrica**: todos os notebooks (`eval_*`, master) agora plotam as 6 métricas
+    (`Accuracy, IoU, Precision, Recall, Dice, AUC`) via loop sobre `METRICS`. SVGs nomeados
+    `<ds>_<metric>.svg`, `<ds>_<family>_<metric>.svg` e `sig_wilcoxon_<a>_vs_<b>_<metric>.svg`.
+  - **Paleta YAML**: criado `model_colors.yaml`; `load_model_palette()` em `utils_eval.py`
+    carrega `dict[model_type → cor]` passado como `color_map_override` em todos os plots.
+    Override hardcoded VSUNet18=azul / VSUNet50=laranja em `utils.plot_mean_dice_score`
+    removido — cores agora 100% no YAML.
+  - **Controle estético uniforme**: `plot_crossdataset_bar` e `plot_sig_heatmap` reescritos
+    com assinaturas completas: `font_sizes` dict, `percentage`, `dpi`, `legend_loc`,
+    `legend_bbox`, `legend_title`, `xlabel`, `y_limits` etc. — paridade com
+    `plot_mean_dice_score`.
+  - **Modularização**: `ALPHA`, `DATASETS_ORDER`, `FINE_TUNED_TO_ZEROSHOT`, `VSUPAIR_COMPARISONS`,
+    `_sig_label`, `compute_bar_sig_pvalues`, `compute_pairwise_sig_matrix`, `plot_crossdataset_bar`,
+    `plot_sig_heatmap` e `load_per_image_dict` movidos para `utils_eval.py`. Cell 14 do master
+    passou de ~200 linhas (constantes + 3 funções) para 3 linhas (só `per_image = load_per_image_dict()`).
+    Imports de matplotlib/scipy são lazy.
+
+- **2026-05-29 (fase 4 — redesign de visualizações no master notebook)**
+  `eval_master_cross_dataset.ipynb` — §6/7 gráficos de barra: eixo x = datasets, cores = modelos,
+  paleta `sns.color_palette("muted")` (publicável), marcadores `*`/`**`/`***` via Wilcoxon
+  one-sided (few-shot@N=1 vs zero-shot par) acima de cada barra, parâmetros `ymin`/`ymax`.
+  §8 Wilcoxon redesenhado: hipótese "Dice(VSUNet) > Dice(IN-UNet / LiteMedSAM-FT)", inclui
+  N=0 (zero-shot via `FINE_TUNED_TO_ZEROSHOT`) e N≥1 (few-shot); heatmap sem anotações
+  numéricas — apenas cor (cinza/azul-claro/azul-escuro) + X vermelho para NaN; 4 figuras
+  SVG separadas (1 por par: VSUNet18>IN-UNet18, VSUNet18>LiteMedSAM-FT, VSUNet50>IN-UNet50,
+  VSUNet50>LiteMedSAM-FT); parâmetros de fonte individuais em `plot_sig_heatmap`; eixo
+  padronizado para "# Samples".
 
 - **2026-05-22 (fase 4 — investigação LiteMedSAM zero-shot)** — Adicionada 6ª variante
   `litemedsam_normalized` (`Zero-Shot LiteMedSAM+IN`): mesmos pesos `lite_medsam.pth` com

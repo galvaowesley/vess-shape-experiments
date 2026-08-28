@@ -19,6 +19,7 @@ import {
 } from "../components/ui";
 import { ColorWheel } from "../components/ColorWheel";
 import { PinDialog, type PinResult } from "../components/PinDialog";
+import { PathField } from "../components/DirectoryPicker";
 import { PageHeader, PreviewPane, InlineNote } from "../components/common";
 
 const ALL_DATASETS = ["dca1", "drive", "octa2d", "vessmap"];
@@ -263,10 +264,12 @@ export default function Significance() {
                 <NumberInput value={spec.export.dpi} onChange={(v) => setSpec((s) => ({ ...s, export: { ...s.export, dpi: v ?? 300 } }))} />
               </Field>
               <Field label="Save path (blank = download)" className="w-72">
-                <TextInput
+                <PathField
                   value={spec.export.save_path ?? ""}
+                  onChange={(v) => setSpec((s) => ({ ...s, export: { ...s.export, save_path: v || null } }))}
+                  mode="file"
                   placeholder="/abs/path/wilcoxon.svg"
-                  onChange={(e) => setSpec((s) => ({ ...s, export: { ...s.export, save_path: e.target.value || null } }))}
+                  defaultFilename={`wilcoxon.${spec.export.format}`}
                 />
               </Field>
             </div>

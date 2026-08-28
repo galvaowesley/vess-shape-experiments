@@ -173,7 +173,204 @@ export interface TableResult {
   latex: string;
 }
 
-export type DashboardKind = "figure" | "wilcoxon" | "table";
+// --------------------------------------------------------------------------- //
+// Figure Studio — inference browser + paper-figure grid composer
+// --------------------------------------------------------------------------- //
+
+export type PanelKind = "pred" | "input" | "gt" | "empty";
+export type RoiMode = "marker" | "crop" | "inset";
+export type RoiScope = "image" | "panel" | "column" | "figure";
+export type RunPolicy = "median" | "best" | "worst" | "fixed";
+
+export interface PanelRef {
+  kind: PanelKind;
+  dataset: string;
+  image: string;
+  stage?: string | null;
+  experiment?: string | null;
+  run_name?: string | null;
+  // display-only metadata (never used to resolve the file path)
+  model_type?: string | null;
+  num_samples?: number | null;
+  run?: number | null;
+  rep?: number | null;
+  score?: number | null;
+  /** Empty cells only: force the "no inference" mark on/off. null = automatic. */
+  missing?: boolean | null;
+}
+
+/** ROI in normalized frame coords (0..1) so it transfers across resolutions. */
+export interface RoiSpec {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  mode: RoiMode;
+  color: string;
+  linewidth: number;
+  inset_corner: "upper right" | "upper left" | "lower right" | "lower left";
+  inset_scale: number;
+  inset_connectors: boolean;
+}
+
+/** Pre-ROI zoom: how much of the frame a panel shows, before the ROI is drawn
+ *  inside it. Same normalized coords and same group key as RoiSpec. */
+export interface CropSpec {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PanelStyle {
+  show_label: boolean;
+  show_metric: boolean;
+  metric: string;
+  decimals: number;
+  label_loc: "top" | "bottom" | "none";
+  metric_loc: "upper left" | "upper right" | "lower left" | "lower right";
+  metric_color: string;
+  metric_fontsize: number;
+  /** Chip behind the metric text; alpha 0 hides it. */
+  metric_bg_color: string;
+  metric_bg_alpha: number;
+  border: boolean;
+  border_color: string;
+  border_width: number;
+  invert: boolean;
+  /** Draw a boxed X where a (model, num_samples) combination has no inference. */
+  missing_mark: boolean;
+  missing_color: string | null;   // null -> follow label_color
+  missing_width: number;
+}
+
+export interface GridFigureSpec {
+  rows: number;
+  cols: number;
+  /** Row-major, length rows*cols. `kind:"empty"` leaves a gap. */
+  panels: PanelRef[];
+  row_labels: string[];
+  col_labels: string[];
+  roi_scope: RoiScope;
+  /** Keyed by scope, e.g. "<dataset>:<image>" when roi_scope === "image". */
+  rois: Record<string, RoiSpec>;
+  /** Pre-ROI zoom, keyed exactly like `rois`. Absent = whole frame. */
+  crops: Record<string, CropSpec>;
+  panel_style: PanelStyle;
+  panel_size: number;
+  wspace: number;
+  hspace: number;
+  background: string;
+  label_color: string;
+  label_fontsize: number;
+  row_label_fontsize: number;
+  col_label_fontsize: number;
+  title: TitleSpec;
+  export: ExportSpec;
+}
+
+export interface RankImagesRequest {
+  dataset: string;
+  num_samples: number[];
+  model_types: string[];
+  stages: string[];
+  metric: string;
+  agg: "mean" | "median" | "min" | "max" | "spread";
+  ascending: boolean;
+  limit: number;
+}
+
+export interface RankedImage {
+  image: string;
+  score: number;
+  n: number;
+  per_model: Record<string, number>;
+}
+
+export interface RankRunsRequest {
+  dataset: string;
+  image: string;
+  model_type: string;
+  num_samples?: number | null;
+  metric: string;
+  ascending: boolean;
+  limit: number;
+}
+
+/** One candidate run for a cell — already carries everything a PanelRef needs. */
+export interface RankedRun {
+  image: string;
+  score: number;
+  stage: string;
+  experiment: string;
+  run_name: string;
+  model_type: string;
+  num_samples: number;
+  run?: number | null;
+  rep?: number | null;
+  is_median: boolean;
+  is_best: boolean;
+}
+
+export interface AutoFillRequest {
+  dataset: string;
+  image: string;
+  model_types: string[];
+  num_samples: number[];
+  metric: string;
+  policy: RunPolicy;
+  fixed_run?: number | null;
+  fixed_rep?: number | null;
+  orientation: "models_as_cols" | "models_as_rows";
+  include_input: boolean;
+  include_gt: boolean;
+}
+
+export interface FigureOptions {
+  datasets: string[];
+  metrics: string[];
+  model_types: string[];
+  stages: string[];
+  /** Per dataset: available num_samples and the test-image list. */
+  by_dataset: Record<
+    string,
+    { num_samples: number[]; images: string[]; model_types: string[] }
+  >;
+}
+
+/** Where the backend reads input images and ground truth from. */
+export interface FigureSettings {
+  dataset_root: string;
+  default_root: string;
+  is_default: boolean;
+  found: boolean;
+  sources: Record<string, { path: string; found: boolean }>;
+}
+
+/** One entry in a filesystem listing (`/api/fs/browse`). */
+export interface FsEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+/** A directory listing for the "Browse..." destination picker. */
+export interface FsListing {
+  path: string;
+  parent: string | null;
+  entries: FsEntry[];
+  favorites: FsEntry[];
+}
+
+export interface GridLayout {
+  id?: string;
+  name: string;
+  spec: GridFigureSpec | Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type DashboardKind = "figure" | "wilcoxon" | "table" | "grid";
 
 export interface DashboardItem {
   id?: string;
@@ -181,7 +378,7 @@ export interface DashboardItem {
   title: string;
   kind: DashboardKind;
   regime?: string | null;
-  spec: PlotSpec | WilcoxonSpec | TableSpec | Record<string, unknown>;
+  spec: PlotSpec | WilcoxonSpec | TableSpec | GridFigureSpec | Record<string, unknown>;
   created_at?: string;
 }
 

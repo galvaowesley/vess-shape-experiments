@@ -1,9 +1,20 @@
 import type {
+  AutoFillRequest,
   DashboardItem,
   DashboardMeta,
+  FigureOptions,
+  FigureSettings,
+  FsListing,
+  GridFigureSpec,
+  GridLayout,
   Metadata,
   PaletteCatalog,
+  PanelRef,
   PlotSpec,
+  RankImagesRequest,
+  RankRunsRequest,
+  RankedImage,
+  RankedRun,
   StylePrefs,
   StylePrefsResponse,
   TableResult,
@@ -176,9 +187,103 @@ export const api = {
 
   /** Generic GET helper for new endpoints (monitor panel). */
   get: <T>(path: string) => fetch(path).then((r) => jsonOrThrow<T>(r)),
+
+  // --- filesystem browser (save/export destination picker) ---
+  browseFs: (path?: string) => {
+    const q = path ? `?path=${encodeURIComponent(path)}` : "";
+    return fetch(`${BASE}/fs/browse${q}`).then((r) => jsonOrThrow<FsListing>(r));
+  },
+  makeDir: (path: string, name: string) =>
+    fetch(`${BASE}/fs/mkdir`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, name }),
+    }).then((r) => jsonOrThrow<FsListing>(r)),
+  writeFile: (path: string, content: string) =>
+    fetch(`${BASE}/fs/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, content }),
+    }).then((r) => jsonOrThrow<{ saved: boolean; path: string }>(r)),
+
+  // --- figure studio ---
+  figureOptions: () => fetch(`${BASE}/figure/options`).then((r) => jsonOrThrow<FigureOptions>(r)),
+  figureSettings: () => fetch(`${BASE}/figure/settings`).then((r) => jsonOrThrow<FigureSettings>(r)),
+  setFigureSettings: (dataset_root: string | null) =>
+    fetch(`${BASE}/figure/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataset_root }),
+    }).then((r) => jsonOrThrow<FigureSettings>(r)),
+  rankImages: (req: RankImagesRequest) =>
+    fetch(`${BASE}/figure/rank/images`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => jsonOrThrow<RankedImage[]>(r)),
+  rankRuns: (req: RankRunsRequest) =>
+    fetch(`${BASE}/figure/rank/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => jsonOrThrow<RankedRun[]>(r)),
+  autoFill: (req: AutoFillRequest) =>
+    fetch(`${BASE}/figure/autofill`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => jsonOrThrow<GridFigureSpec>(r)),
+  renderGrid: (spec: GridFigureSpec) => renderToBlobUrl("/figure/render", spec),
+  exportGrid: (spec: GridFigureSpec) =>
+    fetch(`${BASE}/figure/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(spec),
+    }),
+  /** Each panel as its own file — a zip when downloading, files on disk when
+   *  the spec carries a save_path. */
+  exportGridPanels: (spec: GridFigureSpec, which: "refs" | "all", naming: "full" | "label") =>
+    fetch(`${BASE}/figure/export/panels?which=${which}&naming=${naming}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(spec),
+    }),
+  listLayouts: () => fetch(`${BASE}/figure/layouts`).then((r) => jsonOrThrow<GridLayout[]>(r)),
+  saveLayout: (name: string, spec: GridFigureSpec) =>
+    fetch(`${BASE}/figure/layouts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, spec }),
+    }).then((r) => jsonOrThrow<GridLayout>(r)),
+  updateLayout: (id: string, patch: { name?: string; spec?: GridFigureSpec }) =>
+    fetch(`${BASE}/figure/layouts/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then((r) => jsonOrThrow<GridLayout>(r)),
+  deleteLayout: (id: string) =>
+    fetch(`${BASE}/figure/layouts/${id}`, { method: "DELETE" }).then((r) =>
+      jsonOrThrow<Record<string, unknown>>(r),
+    ),
 };
 
 export function trainingLogSocket(): WebSocket {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return new WebSocket(`${proto}://${location.host}/api/training/logs`);
+}
+
+/** Plain URL builder for <img src> (a GET, unlike the POST-for-blob helpers above). */
+export function figureImgUrl(p: PanelRef, width?: number): string {
+  if (p.kind === "empty") return "";
+  const q = new URLSearchParams({ kind: p.kind, dataset: p.dataset, image: p.image });
+  // Run identity only resolves a prediction. Leaving it on an input/GT request
+  // would give every panel of the same image a different URL and so a separate
+  // browser cache entry, for a byte-identical response.
+  if (p.kind === "pred") {
+    if (p.stage != null) q.set("stage", p.stage);
+    if (p.experiment != null) q.set("experiment", p.experiment);
+    if (p.run_name != null) q.set("run_name", p.run_name);
+  }
+  if (width != null) q.set("w", String(width));
+  return `${BASE}/figure/img?${q}`;
 }

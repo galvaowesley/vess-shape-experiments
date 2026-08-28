@@ -165,9 +165,178 @@ class WilcoxonSpec(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Figure Studio — inference browser + paper-figure grid composer
+# --------------------------------------------------------------------------- #
+PanelKind = Literal["pred", "input", "gt", "empty"]
+RoiMode = Literal["marker", "crop", "inset"]
+RoiScope = Literal["image", "panel", "column", "figure"]
+RunPolicy = Literal["median", "best", "worst", "fixed"]
+
+
+class PanelRef(BaseModel):
+    """Identifies one image on disk.
+
+    `pred` needs the full run identity; `input`/`gt` only need dataset + image.
+    A row of `<ds>_all_results_per_image.csv` maps 1:1 onto the `pred` fields.
+    """
+    kind: PanelKind = "empty"
+    dataset: str = ""
+    image: str = ""                      # test-image stem, e.g. "10571" / "01_test"
+    stage: Optional[str] = None          # scratch | finetune | zero_shot
+    experiment: Optional[str] = None     # "__zero_shot_raw__" for zero-shot
+    run_name: Optional[str] = None
+    # Carried for display only (never used to resolve the path).
+    model_type: Optional[str] = None
+    num_samples: Optional[int] = None
+    run: Optional[int] = None
+    rep: Optional[int] = None
+    score: Optional[float] = None
+    # Empty cells only: force the "no inference" mark on (True) or off (False).
+    # None lets the renderer decide from the grid (see `_unavailable_indices`).
+    missing: Optional[bool] = None
+
+
+class RoiSpec(BaseModel):
+    """Region of interest in *normalized* frame coordinates (0..1).
+
+    Normalized coords survive any full-frame resize, so one ROI transfers
+    unchanged between the native-resolution input/GT and the model-resolution
+    prediction masks (256/288/384) of the same image.
+    """
+    x: float = 0.35
+    y: float = 0.35
+    w: float = 0.18
+    h: float = 0.18
+    mode: RoiMode = "marker"
+    color: str = "#ff2d2d"
+    linewidth: float = 1.5
+    # inset mode only
+    inset_corner: Literal["upper right", "upper left", "lower right", "lower left"] = "lower right"
+    inset_scale: float = 0.42            # inset size as a fraction of the panel
+    inset_connectors: bool = True
+
+
+class CropSpec(BaseModel):
+    """Viewport applied *before* the ROI is drawn — a plain zoom on the frame.
+
+    Independent of `RoiSpec`: this decides how much of the image a panel shows,
+    the ROI decides what gets marked inside it. Keeping them apart is what makes
+    "zoom into the vessel, then box a detail of it" expressible. Same normalized
+    coordinates, so it transfers across resolutions exactly as the ROI does, and
+    it is shared by the same group key.
+    """
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 1.0
+    h: float = 1.0
+
+
+class PanelStyle(BaseModel):
+    show_label: bool = True
+    show_metric: bool = False
+    metric: str = "Dice"
+    decimals: int = 3
+    label_loc: Literal["top", "bottom", "none"] = "none"
+    metric_loc: Literal["upper left", "upper right", "lower left", "lower right"] = "lower left"
+    metric_color: str = "#ffffff"
+    metric_fontsize: float = 8.0
+    # The chip behind the metric text. alpha 0 hides it entirely.
+    metric_bg_color: str = "#000000"
+    metric_bg_alpha: float = 0.55
+    border: bool = False
+    border_color: str = "#444444"
+    border_width: float = 0.8
+    invert: bool = False                 # show masks white-on-black (default) or inverted
+    # A cell whose (model, num_samples) combination has no inference renders as a
+    # boxed diagonal cross rather than blank, so the hole reads as "this run does
+    # not exist" instead of a rendering bug. Deliberate structural gaps (a cleared
+    # cell, the padding around a ragged block) stay blank.
+    missing_mark: bool = True
+    missing_color: Optional[str] = None  # None -> follow label_color
+    missing_width: float = 0.8
+
+
+class GridFigureSpec(BaseModel):
+    rows: int = 3
+    cols: int = 4
+    # Row-major, length rows*cols. `kind="empty"` leaves a gap — that is how the
+    # ragged multi-block layouts (input/GT header row + prediction rows) are built.
+    panels: list[PanelRef] = Field(default_factory=list)
+    row_labels: list[str] = Field(default_factory=list)
+    col_labels: list[str] = Field(default_factory=list)
+    # ROI sharing: "image" -> key "<dataset>:<image>" (draw once, applies to every
+    # panel of that image); "column"/"panel"/"figure" narrow or widen the scope.
+    roi_scope: RoiScope = "image"
+    rois: dict[str, RoiSpec] = Field(default_factory=dict)
+    # Pre-ROI zoom, keyed exactly like `rois`. Absent = show the whole frame.
+    crops: dict[str, CropSpec] = Field(default_factory=dict)
+
+    panel_style: PanelStyle = Field(default_factory=PanelStyle)
+    # layout
+    panel_size: float = 1.6              # inches per panel side
+    wspace: float = 0.04
+    hspace: float = 0.04
+    background: str = "#000000"
+    label_color: str = "#ffffff"
+    label_fontsize: float = 10.0
+    row_label_fontsize: float = 10.0
+    col_label_fontsize: float = 10.0
+    title: TitleSpec = Field(default_factory=TitleSpec)
+    export: ExportSpec = Field(default_factory=ExportSpec)
+
+
+class RankImagesRequest(BaseModel):
+    """Rank test images by a metric aggregated across the selected models,
+    so one featured image can be chosen for a whole figure column."""
+    dataset: str
+    num_samples: list[int] = Field(default_factory=list)   # empty = all
+    model_types: list[str] = Field(default_factory=list)   # empty = all
+    stages: list[str] = Field(default_factory=list)
+    metric: str = "Dice"
+    agg: Literal["mean", "median", "min", "max", "spread"] = "mean"
+    ascending: bool = False
+    limit: int = 200
+
+
+class RankRunsRequest(BaseModel):
+    """Rank the candidate runs (5 splits x 3 seeds) that could fill one cell."""
+    dataset: str
+    image: str
+    model_type: str
+    num_samples: Optional[int] = None
+    metric: str = "Dice"
+    ascending: bool = False
+    limit: int = 60
+
+
+class AutoFillRequest(BaseModel):
+    """Server-side grid fill: pick one run per (model_type x num_samples) cell."""
+    dataset: str
+    image: str
+    model_types: list[str] = Field(default_factory=list)
+    num_samples: list[int] = Field(default_factory=list)
+    metric: str = "Dice"
+    policy: RunPolicy = "median"
+    fixed_run: Optional[int] = None
+    fixed_rep: Optional[int] = None
+    # Layout: models on one axis, num_samples on the other.
+    orientation: Literal["models_as_cols", "models_as_rows"] = "models_as_cols"
+    include_input: bool = True
+    include_gt: bool = True
+
+
+class GridLayout(BaseModel):
+    id: Optional[str] = None
+    name: str = "Untitled layout"
+    spec: dict = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- #
 # Dashboard
 # --------------------------------------------------------------------------- #
-DashboardKind = Literal["figure", "wilcoxon", "table"]
+DashboardKind = Literal["figure", "wilcoxon", "table", "grid"]
 
 
 class DashboardItem(BaseModel):

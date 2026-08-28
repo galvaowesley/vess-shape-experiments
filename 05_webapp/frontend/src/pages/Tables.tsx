@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Copy, Download, Pin, Sparkles } from "lucide-react";
+import { Copy, Download, FolderOpen, Pin, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
 import type { Aggregation, Metadata, TableResult, TableSpec } from "../lib/types";
 import {
@@ -25,6 +25,7 @@ import {
   TextInput,
 } from "../components/ui";
 import { PinDialog, type PinResult } from "../components/PinDialog";
+import { DirectoryPicker } from "../components/DirectoryPicker";
 import { TableView } from "../components/TableView";
 import { PageHeader, InlineNote } from "../components/common";
 
@@ -36,6 +37,7 @@ const SOURCES = [
 ];
 const COUNT_LABEL = "Count (#runs)";
 const SPEC_KEY = "vesslab.tablesSpec";
+const SAVE_DIR_KEY = "vesslab.tablesSaveDir";
 
 function loadSavedSpec(): TableSpec {
   try {
@@ -56,6 +58,8 @@ export default function Tables() {
   const [msg, setMsg] = useState<string | null>(null);
   const [pinOpen, setPinOpen] = useState(false);
   const [editItemId, setEditItemId] = useState<string | null>(null);
+  const [saveTarget, setSaveTarget] = useState<{ label: string; text: string; ext: string } | null>(null);
+  const [saveDir, setSaveDir] = useState(() => localStorage.getItem(SAVE_DIR_KEY) ?? "");
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -126,6 +130,21 @@ export default function Tables() {
     a.download = `table.${ext}`;
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+  async function saveToDisk(path: string) {
+    if (!saveTarget) return;
+    try {
+      await api.writeFile(path, saveTarget.text);
+      const sep = path.includes("\\") ? "\\" : "/";
+      const dir = path.slice(0, path.lastIndexOf(sep));
+      if (dir) {
+        setSaveDir(dir);
+        localStorage.setItem(SAVE_DIR_KEY, dir);
+      }
+      setMsg(`Saved to ${path}.`);
+    } catch (e) {
+      setMsg(`Save failed: ${e}`);
+    }
   }
 
   async function handlePin({ dashboardId, title, mode }: PinResult) {
@@ -290,6 +309,9 @@ export default function Tables() {
                     <Button size="sm" variant="ghost" onClick={() => download(ex.text, ex.ext, ex.mime)} title={`Download ${ex.label}`}>
                       <Download className="h-3.5 w-3.5" /> .{ex.ext}
                     </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setSaveTarget(ex)} title={`Save ${ex.label} to a folder`}>
+                      <FolderOpen className="h-3.5 w-3.5" /> Save…
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -307,6 +329,16 @@ export default function Tables() {
         editItemId={editItemId}
         onConfirm={handlePin}
         onClose={() => setPinOpen(false)}
+      />
+
+      <DirectoryPicker
+        open={saveTarget != null}
+        mode="file"
+        initialPath={saveDir || undefined}
+        defaultFilename={saveTarget ? `table.${saveTarget.ext}` : undefined}
+        title={saveTarget ? `Save ${saveTarget.label} to...` : undefined}
+        onConfirm={saveToDisk}
+        onClose={() => setSaveTarget(null)}
       />
     </div>
   );

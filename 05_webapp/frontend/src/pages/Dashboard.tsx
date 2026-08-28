@@ -22,6 +22,7 @@ import type {
 import { cn, useObjectUrl } from "../lib/util";
 import { Badge, Button, Field, NumberInput, Select, TextInput } from "../components/ui";
 import { TableView } from "../components/TableView";
+import { PathField } from "../components/DirectoryPicker";
 import { PageHeader, InlineNote } from "../components/common";
 
 const ACTIVE_KEY = "vesslab.activeDashboard";
@@ -250,7 +251,7 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-end gap-3 border-b border-border bg-surface px-6 py-3">
         <div className="ml-auto flex flex-wrap items-end gap-2">
           <Field label="Export this dashboard → directory" className="w-72">
-            <TextInput value={outDir} placeholder="/abs/path/figures" onChange={(e) => setOutDir(e.target.value)} />
+            <PathField value={outDir} onChange={setOutDir} mode="directory" placeholder="/abs/path/figures" />
           </Field>
           <Field label="Format" className="w-24">
             <Select value={fmt} onChange={setFmt} options={["png", "svg", "jpg", "pdf"].map((f) => ({ value: f, label: f.toUpperCase() }))} />

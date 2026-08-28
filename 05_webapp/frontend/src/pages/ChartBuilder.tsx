@@ -21,6 +21,7 @@ import {
 import { ColorWheel } from "../components/ColorWheel";
 import { PalettePicker } from "../components/PalettePicker";
 import { PinDialog, type PinResult } from "../components/PinDialog";
+import { PathField } from "../components/DirectoryPicker";
 import { PageHeader, PreviewPane, InlineNote } from "../components/common";
 
 const ALL_DATASETS = ["vessmap", "drive", "dca1", "octa2d"];
@@ -531,10 +532,12 @@ export default function ChartBuilder() {
                 <NumberInput value={spec.export.dpi} onChange={(v) => setSpec((s) => ({ ...s, export: { ...s.export, dpi: v ?? 300 } }))} />
               </Field>
               <Field label="Save path (blank = download)" className="w-72">
-                <TextInput
+                <PathField
                   value={spec.export.save_path ?? ""}
+                  onChange={(v) => setSpec((s) => ({ ...s, export: { ...s.export, save_path: v || null } }))}
+                  mode="file"
                   placeholder="/abs/path/figure.svg"
-                  onChange={(e) => setSpec((s) => ({ ...s, export: { ...s.export, save_path: e.target.value || null } }))}
+                  defaultFilename={`figure.${spec.export.format}`}
                 />
               </Field>
             </div>
