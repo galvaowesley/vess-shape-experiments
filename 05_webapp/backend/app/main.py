@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import paths
-from .routers import dashboard, eval, figuregrid, gallery, images, stats, training
+from .routers import dashboard, eval, figuregrid, fs, gallery, images, stats, training
 
 app = FastAPI(title="VessShape Lab API", version="1.0.0")
 
@@ -26,6 +26,7 @@ app.include_router(eval.router)
 app.include_router(stats.router)
 app.include_router(dashboard.router)
 app.include_router(training.router)
+app.include_router(fs.router)
 # Figure Studio: three modules sharing the /api/figure prefix.
 app.include_router(gallery.router)
 app.include_router(images.router)

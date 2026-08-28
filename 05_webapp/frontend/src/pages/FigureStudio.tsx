@@ -6,6 +6,7 @@ import { defaultGridSpec, hydrateGridSpec, LS_KEY, resizeGrid } from "../lib/fig
 import { useDebounced, useObjectUrl } from "../lib/util";
 import { Button, Checkbox, Field, NumberInput, Section, Segmented, Select, Slider, TextInput } from "../components/ui";
 import { ColorWheel } from "../components/ColorWheel";
+import { PathField } from "../components/DirectoryPicker";
 import { PageHeader, PreviewPane, InlineNote } from "../components/common";
 import { GridCanvas } from "../components/figure/GridCanvas";
 import { RoiEditor } from "../components/figure/RoiEditor";
@@ -487,10 +488,12 @@ export default function FigureStudio() {
               </Field>
             </div>
             <Field label="Save path (blank = download)">
-              <TextInput
+              <PathField
                 value={spec.export.save_path ?? ""}
+                onChange={(v) => patchExport({ save_path: v || null })}
+                mode="file"
                 placeholder="/abs/path/figure.svg"
-                onChange={(e) => patchExport({ save_path: e.target.value || null })}
+                defaultFilename={`figure.${spec.export.format}`}
               />
             </Field>
             <Checkbox
@@ -524,10 +527,13 @@ export default function FigureStudio() {
                     : "Named with dataset, image and run identity — unambiguous across figures, but long."}
                 </InlineNote>
                 <InlineNote>
-                  Input and ground truth are always included, whether or not the grid shows them.
-                  Each file is rendered on its own with the same ROI, no row/column labels.
+                  Input and ground truth are always included, whether or not the grid shows them,
+                  and inherit the figure's crop and ROI so a zoomed figure gets zoomed reference
+                  frames. Each file is rendered on its own, without row/column labels.
                   {spec.export.save_path
-                    ? " Written next to the figure with its name as prefix."
+                    ? panelNaming === "label"
+                      ? " Written next to the figure."
+                      : " Written next to the figure with its name as prefix."
                     : " Downloaded as a zip alongside the figure."}
                 </InlineNote>
               </>

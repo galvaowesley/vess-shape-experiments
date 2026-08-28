@@ -347,6 +347,21 @@ export interface FigureSettings {
   sources: Record<string, { path: string; found: boolean }>;
 }
 
+/** One entry in a filesystem listing (`/api/fs/browse`). */
+export interface FsEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+/** A directory listing for the "Browse..." destination picker. */
+export interface FsListing {
+  path: string;
+  parent: string | null;
+  entries: FsEntry[];
+  favorites: FsEntry[];
+}
+
 export interface GridLayout {
   id?: string;
   name: string;

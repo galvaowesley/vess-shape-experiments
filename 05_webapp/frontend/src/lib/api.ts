@@ -4,6 +4,7 @@ import type {
   DashboardMeta,
   FigureOptions,
   FigureSettings,
+  FsListing,
   GridFigureSpec,
   GridLayout,
   Metadata,
@@ -186,6 +187,24 @@ export const api = {
 
   /** Generic GET helper for new endpoints (monitor panel). */
   get: <T>(path: string) => fetch(path).then((r) => jsonOrThrow<T>(r)),
+
+  // --- filesystem browser (save/export destination picker) ---
+  browseFs: (path?: string) => {
+    const q = path ? `?path=${encodeURIComponent(path)}` : "";
+    return fetch(`${BASE}/fs/browse${q}`).then((r) => jsonOrThrow<FsListing>(r));
+  },
+  makeDir: (path: string, name: string) =>
+    fetch(`${BASE}/fs/mkdir`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, name }),
+    }).then((r) => jsonOrThrow<FsListing>(r)),
+  writeFile: (path: string, content: string) =>
+    fetch(`${BASE}/fs/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, content }),
+    }).then((r) => jsonOrThrow<{ saved: boolean; path: string }>(r)),
 
   // --- figure studio ---
   figureOptions: () => fetch(`${BASE}/figure/options`).then((r) => jsonOrThrow<FigureOptions>(r)),

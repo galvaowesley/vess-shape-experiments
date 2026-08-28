@@ -465,33 +465,46 @@ def _single_panel_spec(spec: GridFigureSpec, panel: PanelRef, roi: Optional[RoiS
     return single
 
 
-_Candidate = tuple[str, PanelRef, Optional[RoiSpec], Optional[CropSpec]]
+_Candidate = tuple[str, PanelRef, Optional[RoiSpec], Optional[CropSpec], Optional[tuple[int, int]]]
 
 
-def _reference_panels(spec: GridFigureSpec) -> list[_Candidate]:
+def _reference_panels(spec: GridFigureSpec,
+                      canvas: dict[str, tuple[int, int]]) -> list[_Candidate]:
     """One input and one ground truth per distinct image in the figure.
 
     These are *synthesized*, not looked up: a qualitative figure often shows
     only predictions, so requiring an input/GT cell to already sit in the grid
-    would make the reference export silently produce nothing. Each borrows the
-    ROI of the first grid panel showing that image, which keeps the marking
-    aligned under every `roi_scope`, not just "image".
+    would make the reference export silently produce nothing.
+
+    Geometry is inherited from the grid: the crop and the ROI are taken from the
+    first panel of that image that defines one, scanning the image's own
+    input/GT cells before its predictions. Both are searched independently,
+    since a figure may zoom without marking or mark without zooming. Falling
+    through every panel of the image matters under the per-column and per-panel
+    scopes, where the reference cell carries no geometry of its own but the
+    prediction the figure is actually about does — without it a zoomed figure
+    would ship un-zoomed reference frames.
+
+    `canvas` is the shared drawing size per image, so the exported frame keeps
+    the aspect its cells have in the grid.
     """
-    seen: dict[tuple[str, str], tuple[Optional[RoiSpec], Optional[CropSpec]]] = {}
+    order: dict[tuple[str, str], list[tuple[int, str]]] = {}
     for i, panel in enumerate(spec.panels[: spec.rows * spec.cols]):
         if panel.kind == "empty" or not panel.dataset or not panel.image:
             continue
-        key = (panel.dataset, panel.image)
-        if key in seen:
-            continue
+        rank = 0 if panel.kind in ("input", "gt") else 1
         group = _roi_key(spec.roi_scope, panel, i, spec.cols)
-        seen[key] = (spec.rois.get(group), spec.crops.get(group))
+        order.setdefault((panel.dataset, panel.image), []).append((rank, group))
 
     out: list[_Candidate] = []
-    for (dataset, image), (roi, crop) in seen.items():
+    for (dataset, image), entries in order.items():
+        keys = [k for _, k in sorted(entries, key=lambda e: e[0])]  # stable: grid order within a rank
+        roi = next((spec.rois[k] for k in keys if k in spec.rois), None)
+        crop = next((spec.crops[k] for k in keys if k in spec.crops), None)
         for kind in ("input", "gt"):
             stem = _slug(f"{dataset}_{image}_{kind}")
-            out.append((stem, PanelRef(kind=kind, dataset=dataset, image=image), roi, crop))
+            out.append((stem, PanelRef(kind=kind, dataset=dataset, image=image), roi, crop,
+                        canvas.get(f"{dataset}:{image}")))
     return out
 
 
@@ -539,20 +552,38 @@ def export_panels(
     result instead of a broken dataset path.
     """
     ext = _EXT_NAME[spec.export.format]
-    candidates = _reference_panels(spec)
+    grid_panels = _pad_panels(spec.panels, spec.rows * spec.cols)
+
+    # The grid resamples each ROI group onto a shared canvas before drawing, and
+    # that canvas decides the panel's aspect. Recovering it here (one size probe
+    # per source file) is what keeps an exported panel the same shape as its
+    # cell. References go by image rather than by group key: they stand for the
+    # whole image, not for one column or one cell of it.
+    loader = _Loader()
+    _, native, _ = _resolve_all(grid_panels, loader)
+    group_canvas = _canvas_sizes(
+        native, [_roi_key(spec.roi_scope, p, i, spec.cols) for i, p in enumerate(grid_panels)])
+    image_canvas = _canvas_sizes(native, [f"{p.dataset}:{p.image}" for p in grid_panels])
+
+    candidates = _reference_panels(spec, image_canvas)
     if which != "refs":
         candidates += [
             (_panel_slug(p, i, spec), p,
              spec.rois.get(_roi_key(spec.roi_scope, p, i, spec.cols)),
-             spec.crops.get(_roi_key(spec.roi_scope, p, i, spec.cols)))
-            for i, p in enumerate(spec.panels[: spec.rows * spec.cols])
+             spec.crops.get(_roi_key(spec.roi_scope, p, i, spec.cols)),
+             group_canvas.get(_roi_key(spec.roi_scope, p, i, spec.cols)))
+            for i, p in enumerate(grid_panels)
             if p.kind == "pred"
         ]
+
+    # Every panel renders on a canvas the size of one grid cell, so the files
+    # drop into a layout beside the figure at the same scale as the cells.
+    cell = _cell_size(spec)
 
     out: list[tuple[str, bytes, str]] = []
     skipped: list[str] = []
     used: set[str] = set()
-    for stem, panel, roi, crop in candidates:
+    for stem, panel, roi, crop, canvas in candidates:
         try:
             gallery.resolve_panel(
                 panel.kind, panel.dataset, panel.image,
@@ -564,12 +595,47 @@ def export_panels(
         name = _dedupe(_slug(_panel_label(panel)) or stem, used) if naming == "label" else stem
         # No labels to leave room for, so trim the tight-bbox margin too --
         # otherwise the picture ships with a band of background around it.
-        content, mime = render_grid(_single_panel_spec(spec, panel, roi, crop), pad_inches=0.0)
+        content, mime = render_grid(_single_panel_spec(spec, panel, roi, crop),
+                                    pad_inches=0.0, axes_size=cell, canvas_size=canvas)
         out.append((f"{name}.{ext}", content, mime))
     return out, skipped
 
 
-def render_grid(spec: GridFigureSpec, pad_inches: Optional[float] = None) -> tuple[bytes, str]:
+def _figure_size(spec: GridFigureSpec) -> tuple[float, float]:
+    """Canvas in inches: one `panel_size` square per cell plus room for headers."""
+    extra_top = 0.0
+    if any(spec.col_labels):
+        extra_top += 0.38
+    if spec.title.text:
+        extra_top += 0.5
+    extra_left = 0.55 if any(spec.row_labels) else 0.0
+    return (max(spec.cols * spec.panel_size + extra_left, 0.5),
+            max(spec.rows * spec.panel_size + extra_top, 0.5))
+
+
+def _cell_size(spec: GridFigureSpec) -> tuple[float, float]:
+    """Inches occupied by one cell of `spec`'s grid, headers and gaps accounted for.
+
+    Repeats matplotlib's own gridspec arithmetic: the default subplot margins
+    take their cut of the canvas first, and wspace/hspace are fractions of a
+    single cell, so n cells and n-1 gaps share what is left. A standalone panel
+    export renders on a canvas of exactly this size, which is what makes the
+    exported file come out the same size as the cell it was lifted from — the
+    margins alone differ enough between a 3x4 grid and a 1x1 one to shrink it by
+    a percent or two otherwise.
+    """
+    fig_w, fig_h = _figure_size(spec)
+    rc = plt.rcParams
+    span_w = (rc["figure.subplot.right"] - rc["figure.subplot.left"]) * fig_w
+    span_h = (rc["figure.subplot.top"] - rc["figure.subplot.bottom"]) * fig_h
+    cols, rows = max(spec.cols, 1), max(spec.rows, 1)
+    return (max(span_w / (cols + spec.wspace * (cols - 1)), 0.1),
+            max(span_h / (rows + spec.hspace * (rows - 1)), 0.1))
+
+
+def render_grid(spec: GridFigureSpec, pad_inches: Optional[float] = None,
+                axes_size: Optional[tuple[float, float]] = None,
+                canvas_size: Optional[tuple[int, int]] = None) -> tuple[bytes, str]:
     rows, cols = spec.rows, spec.cols
     n = rows * cols
     panels = _pad_panels(spec.panels, n)
@@ -577,19 +643,17 @@ def render_grid(spec: GridFigureSpec, pad_inches: Optional[float] = None) -> tup
 
     loader = _Loader()
     resolved, native, errors = _resolve_all(panels, loader)
-    canvas = _canvas_sizes(native, keys)
+    # `canvas_size` imposes the shared canvas a larger figure computed: a panel
+    # pulled out on its own would otherwise be sized from its own resolution and
+    # take a different aspect than the cell it came from (a DRIVE prediction is
+    # square at 256x256, the cell it sits in is 565x584).
+    canvas = dict.fromkeys(keys, canvas_size) if canvas_size is not None else _canvas_sizes(native, keys)
     unavailable = _unavailable_indices(panels, cols)
 
     row_labels, col_labels = spec.row_labels, spec.col_labels
-    extra_top = 0.0
-    if any(col_labels):
-        extra_top += 0.38
-    if spec.title.text:
-        extra_top += 0.5
-    extra_left = 0.55 if any(row_labels) else 0.0
-
-    fig_w = max(cols * spec.panel_size + extra_left, 0.5)
-    fig_h = max(rows * spec.panel_size + extra_top, 0.5)
+    # `axes_size` asks for a canvas that *is* the drawing area: the caller has
+    # already sized the cell and wants no margin around it (see `_cell_size`).
+    fig_w, fig_h = axes_size if axes_size is not None else _figure_size(spec)
 
     fig = None
     try:
@@ -599,6 +663,8 @@ def render_grid(spec: GridFigureSpec, pad_inches: Optional[float] = None) -> tup
                 gridspec_kw={"wspace": spec.wspace, "hspace": spec.hspace},
                 facecolor=spec.background,
             )
+            if axes_size is not None:
+                fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
             for r in range(rows):
                 for c in range(cols):
