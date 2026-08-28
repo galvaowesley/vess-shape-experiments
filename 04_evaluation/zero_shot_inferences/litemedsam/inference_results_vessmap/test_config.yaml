@@ -16,7 +16,7 @@ resize_size:
 - 256
 - 256
 run_path: .
-save_inference_images: false
+save_inference_images: true
 seed: 0
 skip_boxplot: true
 skip_checkpoint_loading: true
