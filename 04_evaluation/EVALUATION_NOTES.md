@@ -5,7 +5,7 @@
 > possa ser retomado em qualquer sessão. **Atualize a seção "Histórico de mudanças"
 > sempre que algo for alterado.**
 
-Última atualização: 2026-05-29 (fase 4 — multi-métrica + paleta YAML)
+Última atualização: 2026-10-09 (resultados regenerados com o scratch completo nos 4 datasets)
 
 ---
 
@@ -17,15 +17,28 @@ variantes para **7 variantes de modelo** + zero-shot.
 
 ## 2. Datasets
 
-| Dataset  | nº max de samples (ns) | Zero-shot real? | Scratch disponível? |
-|----------|------------------------|-----------------|---------------------|
-| VessMap  | 20                     | ✅ Sim (6 variantes) | ✅ Sim          |
-| DRIVE    | 16                     | ✅ Sim (6 variantes) | ❌ **Ausente** (inferência ainda não rodou para `multi_train_scratch_drive_*`) |
-| DCA1     | 20                     | ✅ Sim (6 variantes) | ✅ Sim          |
-| OCTA2D   | 20                     | ✅ Sim (6 variantes) | ✅ Sim (1 run sem `metrics_stats.csv`) |
+Situação em 2026-10-09. Esperado por modelo: 15 runs por ns (5 runs × 3 reps), ou seja,
+**165** linhas (11 ns) nos datasets com ns máx. 20 e **135** (9 ns) no DRIVE.
+
+| Dataset  | nº max de samples (ns) | Zero-shot real? | Scratch UNet18 / UNet50 (runs) | Runs sem `metrics_stats.csv` (todos os modelos) |
+|----------|------------------------|-----------------|--------------------------------|------------------------------------------------|
+| VessMap  | 20                     | ✅ Sim (5 variantes) | ✅ 165 / 164               | UNet50 ns=12 (run4 rep1); VSUNet50 ns=20 (run3 rep2) |
+| DRIVE    | 16                     | ✅ Sim (5 variantes) | ✅ 134 / 135               | UNet18 ns=14 (run5 rep3) |
+| DCA1     | 20                     | ✅ Sim (5 variantes) | ✅ 164 / 165               | UNet18 ns=8 (run5 rep1) |
+| OCTA2D   | 20                     | ✅ Sim (5 variantes) | ✅ 165 / 165               | IN-UNet50 ns=14 (run5 rep3); LiteMedSAM-FT ns=12 (run3 rep1) |
+
+> **Runs faltantes (6 no total):** todos são falhas de **treino** registradas em `train_failures.log`
+> do experimento (returncode −6/−11/1), não de inferência. Só o DCA1 UNet18 ns=8 terminou as 500 épocas
+> e tem `checkpoint.pt` → basta rodar a inferência. Os outros 5 pararam no meio do treino
+> (épocas 114–415 de 500) e não têm checkpoint → precisam ser retreinados.
+
+> **Um experimento de scratch por modelo/dataset** (`multi_train_scratch_<ds>_unet{18,50}_lr_e-{2,3}[_ignore_class_weights]`).
+> VessMap usa class weights (`ignore_class_weights: false`) tanto no scratch quanto no fine-tuning;
+> os outros 3 datasets usam `ignore_class_weights: true` em todos os modelos.
 
 > **Zero-shot (fase 3+4):** os 4 datasets têm zero-shot real gerado por `run_zero_shot_inference.ipynb`
-> em 6 variantes — VSUNet18/50 (VessShape), IN-UNet18/50 (ImageNet), LiteMedSAM e LiteMedSAM+IN.
+> em 5 variantes — VSUNet18/50 (VessShape), IN-UNet18/50 (ImageNet) e LiteMedSAM. A 6ª variante
+> (LiteMedSAM+IN) ainda não rodou (sem `zero_shot_inferences/litemedsam_normalized/`).
 > O mock foi aposentado (fica só como fallback se um CSV faltar).
 
 ## 3. Layout dos dados (origem)
@@ -65,7 +78,8 @@ Convenções: `VS`=VessShape, `IN-`=ImageNet, `-FT`=fine-tuned, `+IN`=normaliza�
 ## 5. Decisões fechadas
 
 - **Estrutura**: 1 notebook mestre + 4 por-dataset, todos reusando `utils_eval.py`.
-- **DRIVE scratch ausente** → pular silenciosamente (séries não aparecem; sanity cell avisa).
+- **Runs sem `metrics_stats.csv`** → pular silenciosamente (a célula de cobertura mostra a contagem).
+  O DRIVE scratch, que estava ausente, foi preenchido em 2026-10-09.
 - **Zero-shot** → real para os 4 datasets (5 variantes), gerado por `run_zero_shot_inference.ipynb`.
   Mock (`mock_zero_shot=True`) só como fallback se um CSV faltar.
 - **Dirs ignorados** (em `DEFAULT_IGNORE_DIRS`):
@@ -82,7 +96,7 @@ Convenções: `VS`=VessShape, `IN-`=ImageNet, `-FT`=fine-tuned, `+IN`=normaliza�
 |----------------------------------|-------|
 | `utils_eval.py`                  | Loader/labeler/mock + wrappers de resumo e estilos de linha |
 | `eval_vessmap.ipynb`             | Avaliação VessMap (zero-shot real) |
-| `eval_drive.ipynb`               | Avaliação DRIVE (zero-shot real, sem scratch) |
+| `eval_drive.ipynb`               | Avaliação DRIVE (zero-shot real) |
 | `eval_dca1.ipynb`                | Avaliação DCA1 (zero-shot mock) |
 | `eval_octa2d.ipynb`              | Avaliação OCTA2D (zero-shot mock) |
 | `eval_master_cross_dataset.ipynb`| Comparações cross-dataset + tabelas/figuras agregadas |
@@ -249,8 +263,9 @@ Dice zero-shot observado (referência — fase 3):
       loop sobre as 6 métricas em §4/§5 (eval_*) e §4/§6/§7/§8 (master). SVGs nomeados por métrica.
 - [ ] Rodar `litemedsam_normalized` (fase 4) nos 4 datasets e re-executar `eval_*.ipynb`;
       confirmar que LiteMedSAM+IN Dice > 0 (valida H1) ou documentar como limitação.
-- [ ] Rodar inferência **from-scratch** do DRIVE (`multi_train_scratch_drive_*`) para
-      preencher `UNet18`/`UNet50` no DRIVE.
+- [x] **2026-10-09** — Scratch do DRIVE (`multi_train_scratch_drive_*`) completo; resultados regenerados.
+- [ ] Completar os 6 runs faltantes (ver §2): rodar só a inferência do DCA1 UNet18 ns=8
+      (`checkpoint.pt` presente) e retreinar os outros 5 (sem checkpoint). Depois, re-executar os `eval_*.ipynb`.
 - [ ] (Opcional) Coordenar cores das novas variantes `IN-UNet*` e `LiteMedSAM-FT` no
       `plot_mean_dice_score` (hoje usam a paleta padrão; `share_zero_shot_color_with`
       só conhece resnet/unet/vsunet).
@@ -265,8 +280,12 @@ Dice zero-shot observado (referência — fase 3):
 
 - `plot_mean_dice_score` cicla 4 line styles para 7+ hues — mitigado passando `default_line_styles_7way()` explícito.
 - `share_zero_shot_color_with` só conhece resnet/unet/vsunet; `IN-UNet*` e `LiteMedSAM-FT` ficam com cor da paleta padrão (suficiente para o paper inicial).
-- OCTA2D finetune: 1 run sem `metrics_stats.csv` (164/165) — skip silencioso é aceitável.
-- DRIVE scratch ainda vazio — sanity cell sinaliza; re-rodar a avaliação quando a inferência from-scratch for feita.
+- 6 runs sem `metrics_stats.csv` (1 por célula afetada, ver §2): as células ficam com 14/15 runs e
+  o skip é silencioso. Nas células da tabela do paper (n=1 e n=máx), só o VSUNet50 do VessMap em n=20 é afetado (14 runs).
+- **Experimentos sobrescritos sem rastro:** o diretório `multi_train_scratch_vessmap_unet50_lr_e-3` foi retreinado
+  com o mesmo nome em 06–07/jun. Os resumos antigos (gerados em 05/jun) vinham da rodada anterior, que tinha
+  cobertura parcial e Dice 72.6 ± 4.4 em n=20 (14 runs). Não sobrou nada dela em disco. O valor definitivo é o atual
+  (85.6 ± 1.3, 15 runs). Para evitar resumos desatualizados, re-executar os `eval_*.ipynb` sempre que um experimento mudar.
 - **LiteMedSAM (torchtrainer)** usa encoders singletons a nível de módulo: `test()` in-process move-os
   p/ GPU e a 2a chamada quebra com device-mismatch. Por isso `run_zero_shot_inference.ipynb` roda
   cada inferência como **subprocesso** de `src/test.py` (igual ao orquestrador few-shot).
@@ -278,6 +297,20 @@ Dice zero-shot observado (referência — fase 3):
   embedding é idêntico em zero-shot e few-shot; a diferença vem do encoder/decoder adaptados.
 
 ## 11. Histórico de mudanças
+
+- **2026-10-09 (regeneração com o scratch completo)**
+  `results/*_results_summary.csv`, `cross_dataset_summary.csv`, `cross_dataset_coverage.csv` e
+  `cross_dataset_long.csv` estavam desatualizados (gerados em 05/jun, com o scratch incompleto).
+  Re-executados `eval_vessmap`, `eval_drive`, `eval_dca1`, `eval_octa2d` e `eval_master_cross_dataset`
+  (`nbconvert --execute --inplace`), sem erros. Os `*_few_shot_results*.csv` ficaram idênticos. Mudaram:
+  - **Scratch (UNet18/UNet50):** o DRIVE passa a ter n=16 (77.5±0.4 / 78.2±0.2); o DCA1 ganha n=1
+    (32.2±13.9 / 36.4±14.2) e n=20 (71.3±1.8 / 72.3±2.8); no VessMap, n=1 fica 49.8±7.1 / 51.0±7.6 e
+    n=20 fica 84.7±1.8 / 85.6±1.3. Antes, o UNet50 em n=20 dava 72.6±4.4, vindo da rodada anterior,
+    já sobrescrita (ver §10.1).
+  - **Zero-shot LiteMedSAM:** `*_zero_shot_results*.csv` agora refletem os `zero_shot/*.csv`
+    atualizados no commit 80da2a9 (Dice VessMap 0.0 → 1.2%; DCA1 0.9 → 0.0%).
+  - Cobertura: 165 runs por modelo (135 no DRIVE), exceto os 6 runs faltantes listados em §2.
+  - §2 reescrita (contagens + falhas); §5, §6, §10 e §10.1 atualizados.
 
 - **2026-05-29 (fase 4 — multi-métrica, paleta YAML e modularização)**
   Refatoração ampla do pipeline de plots para o paper:
